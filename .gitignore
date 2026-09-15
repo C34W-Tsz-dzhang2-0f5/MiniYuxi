@@ -1,0 +1,53 @@
+# ===== Secrets & local data（NEVER commit） =====
+data/
+*.db
+*.sqlite
+*.sqlite3
+.secret
+.env
+.env.*
+!.env.example
+# 含明文 Key 的真实启动脚本：见 start_miniyuxi.example.bat
+start_miniyuxi.bat
+run.bat
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# ===== Logs & local artifacts =====
+*.log
+miniyuxi_run.log
+smoke_*.log
+verify_out.txt
+jd_run.json
+jd_run.png
+jd_report.html
+jd_err.txt
+
+# ===== Screenshots & UI backups =====
+*.png
+*.bak_*
+*legacy*
+index.html.bak_*
+index_legacy.html
+
+# ===== Personal / dev QA scripts that embed real keys =====
+verify_*.py
+test_*.py
+
+# ===== Internal planning docs（not for public release） =====
+目标任务书_v1.md
+PROGRESS.md
+BLOCKED.md
+知识库_李博杰AI_Agent书_知识摘要.md
+代码审查_功能落地核对_20260910.md
+评估_真Agent达成度_20260911.md
+新建文本文档.txt
+
+# ===== OS =====
+.DS_Store
+Thumbs.db

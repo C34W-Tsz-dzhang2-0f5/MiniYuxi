@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MiniYuxi · WorkBuddy 工作台复刻</title>
+<link rel="stylesheet" href="/wb/wb_workbench.css">
+</head>
+<body class="light cb-light vscode-light agent-ui-theme">
+
+<div class="teams-container" id="teamsContainer">
+
+  <!-- ============ 左：会话侧边栏 ============ -->
+  <div class="conversation-sidebar">
+    <div class="conversation-list conversation-list-collapsed" id="convList">
+
+      <!-- 折叠态 -->
+      <div class="conversation-list-collapsed-upper" id="collapsedUpper">
+        <div class="conversation-list-collapsed-top">
+          <img class="collapsed-logo" id="collapsedLogo" alt="logo"
+               src="https://static.workbuddy.cn/web/workbuddy/db8913a3fa602efaf644689bddc87a46ed4fe300/assets/workbuddy-logo-WhgOvEF7.png">
+          <span class="collapsed-expand-icon">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M2.5 3.5h11M2.5 8h11M2.5 12.5h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+          </span>
+        </div>
+        <div class="conversation-list-header conversation-list-header-collapsed">
+          <button class="conversation-list-collapsed-icon-button" id="btnExpand" title="展开侧边栏" aria-label="展开侧边栏">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M14 0H0v1.33h14V0ZM14 5H0v1.33h14V5ZM0 10h7v1.33H0V10Z" fill-rule="evenodd"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- 展开态 -->
+      <div class="conversation-list-expanded" id="expandedBody">
+        <div class="conversation-list-header">
+          <div class="conversation-list-brand">
+            <img class="brand-logo" alt="logo"
+                 src="https://static.workbuddy.cn/web/workbuddy/db8913a3fa602efaf644689bddc87a46ed4fe300/assets/workbuddy-logo-WhgOvEF7.png">
+          </div>
+          <button class="conversation-list-collapsed-icon-button" id="btnCollapse" title="收起侧边栏" aria-label="收起侧边栏">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M14 0H0v1.33h14V0ZM14 5H0v1.33h14V5ZM0 10h7v1.33H0V10Z" fill-rule="evenodd"/>
+            </svg>
+          </button>
+        </div>
+        <button class="new-conversation-btn" id="btnNewChat">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M7.25 2.5a.75.75 0 0 1 1.5 0v4.75H13.5a.75.75 0 0 1 0 1.5H8.75v4.75a.75.75 0 0 1-1.5 0V8.75H2.5a.75.75 0 0 1 0-1.5h4.75V2.5Z"/>
+          </svg>
+          <span>新对话</span>
+        </button>
+        <div class="conversation-search">
+          <svg class="search-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85Zm-1.06-1.06a4.5 4.5 0 1 1 .001-.001Z"/>
+          </svg>
+          <input type="text" id="convSearch" placeholder="搜索对话">
+        </div>
+        <div class="conversation-list-body" id="convListBody"><!-- JS 渲染 --></div>
+      </div>
+
+      <div class="conversation-list-footer" id="convFooter">
+        <div class="sidebar-footer-collapsed-content">
+          <button class="footer-icon-btn" id="btnTheme" title="切换主题" aria-label="切换主题">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M8 1a7 7 0 1 0 7 7 5.5 5.5 0 0 1-7-7Z"/>
+            </svg>
+          </button>
+        </div>
+        <div class="sidebar-footer-expanded-content">
+          <div class="footer-user">
+            <img class="footer-avatar" alt="avatar"
+                 src="https://static.workbuddy.cn/web/agents/b870386c8a167b0d4f3b564291ee5f53aa6a170e/assets/default-miao-Bvq8EV-u.webp">
+            <span class="footer-user-name">本地模式</span>
+          </div>
+          <button class="footer-icon-btn" id="btnTheme2" title="切换主题" aria-label="切换主题">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M8 1a7 7 0 1 0 7 7 5.5 5.5 0 0 1-7-7Z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============ 中：主内容 ============ -->
+  <div class="teams-content-wrapper">
+    <div class="teams-main-content">
+      <div class="cloud-welcome" id="cloudWelcome">
+
+        <header class="cloud-welcome__header">
+          <div class="cloud-welcome__header-content">
+            <a class="cloud-welcome__logo" href="#" aria-label="WorkBuddy">
+              <img class="logo-light" alt="WorkBuddy"
+                   src="https://static.workbuddy.cn/web/workbuddy/db8913a3fa602efaf644689bddc87a46ed4fe300/assets/workbuddy-logo-WhgOvEF7.png">
+            </a>
+            <nav class="cloud-welcome__nav" id="topNav"><!-- JS 渲染 --></nav>
+            <div class="cloud-welcome__actions">
+              <button class="wb-button wb-button--primary wb-button--medium cloud-welcome__login-btn" id="btnLogin">
+                <span class="wb-button__content">登录</span>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <main class="cloud-welcome__main">
+          <div class="main-content main-content--welcome" id="mainContent">
+            <div class="chat-container cb-font-size-uncapped chat-container--welcome" id="chatContainer">
+              <div class="wb-cb-chat" id="cbChat">
+
+                <!-- 欢迎区 -->
+                <div class="welcome-stage" id="welcomeStage">
+                  <div class="wb-home-header">
+                    <h1 class="wb-home-title">WorkBuddy, 我帮你</h1>
+                  </div>
+
+                  <div class="wb-scene-tabs" id="sceneTabs"><!-- JS 渲染 --></div>
+
+                  <section class="wb-home-composer cb-font-size-capped">
+                    <div class="wb-home-composer__chips">
+                      <div class="quick-actions-container">
+                        <div class="quick-actions quick-actions--fade-right">
+                          <div class="quick-actions__list" id="quickActions"><!-- JS 渲染 --></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="wb-home-composer__input-slot">
+                      <div class="composer-shell">
+                        <div class="composer-editable" id="composerInput"
+                             contenteditable="true" role="textbox" aria-multiline="true"
+                             data-placeholder="今天帮你做些什么？"></div>
+                        <div class="composer-bottom">
+                          <div class="composer-tools">
+                            <button class="composer-tool" data-insert="@" title="引用对话文件">
+                              <span class="tool-kbd">@</span> 引用对话文件
+                            </button>
+                            <button class="composer-tool" data-insert="/" title="调用技能与指令">
+                              <span class="tool-kbd">/</span> 调用技能与指令
+                            </button>
+                          </div>
+                          <button class="composer-send" id="btnSend" disabled aria-label="发送">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                              <path d="M2.3 7.05a1 1 0 0 1 1.4-1.4l2.05 2.05V2.5a1 1 0 0 1 2 0v5.2l2.05-2.05a1 1 0 0 1 1.4 1.4l-3.7 3.7a1 1 0 0 1-1.4 0l-3.8-3.7Z"/>
+                              <path d="M13.5 13.5h-11a1 1 0 0 1 0-2h11a1 1 0 0 1 0 2Z"/>
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="wb-input-footer">
+                      <span class="footer-hint"><b>@</b> 引用对话文件，<b>/</b> 调用技能与指令</span>
+                    </div>
+                  </section>
+                </div>
+
+                <!-- 消息区 -->
+                <div class="message-scroll" id="messageScroll" hidden>
+                  <div class="message-list" id="messageList"></div>
+                </div>
+
+                <!-- 对话态输入（贴底） -->
+                <div class="chat-dock" id="chatDock" hidden>
+                  <div class="composer-shell composer-shell--dock">
+                    <div class="composer-editable" id="composerInputDock"
+                         contenteditable="true" role="textbox" aria-multiline="true"
+                         data-placeholder="继续对话…"></div>
+                    <div class="composer-bottom">
+                      <div class="composer-tools">
+                        <button class="composer-tool" data-insert="@" data-target="composerInputDock" title="引用对话文件">
+                          <span class="tool-kbd">@</span>
+                        </button>
+                        <button class="composer-tool" data-insert="/" data-target="composerInputDock" title="调用技能与指令">
+                          <span class="tool-kbd">/</span>
+                        </button>
+                      </div>
+                      <button class="composer-send" id="btnSendDock" disabled aria-label="发送">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                          <path d="M2.3 7.05a1 1 0 0 1 1.4-1.4l2.05 2.05V2.5a1 1 0 0 1 2 0v5.2l2.05-2.05a1 1 0 0 1 1.4 1.4l-3.7 3.7a1 1 0 0 1-1.4 0l-3.8-3.7Z"/>
+                          <path d="M13.5 13.5h-11a1 1 0 0 1 0-2h11a1 1 0 0 1 0 2Z"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </main>
+
+      </div>
+      <div class="route-keep-alive-slot route-keep-alive-slot--hidden"></div>
+    </div>
+  </div>
+
+  <!-- ============ 右：详情面板 ============ -->
+  <div class="detail-panel-container" id="detailPanelContainer">
+    <div class="sidebar-next">
+      <div class="sidebar-next-body">
+        <div class="detail-panel detail-panel--no-header" id="detailPanel">
+          <div class="detail-layout detail-layout--stacked">
+            <div class="detail-layout__top">
+              <div class="sidebar-next-main-header">
+                <div class="sidebar-next-main-header__left">
+                  <div class="sidebar-next-overview-trigger">
+                    <div role="button" class="sidebar-next-top-button sidebar-next-top-button--menu"
+                         id="btnToggleDetail" aria-label="收起面板" title="收起面板">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <path d="M14 0H0v1.33h14V0ZM14 5H0v1.33h14V5ZM0 10h7v1.33H0V10Z" fill-rule="evenodd"/>
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+                <div class="sidebar-next-main-header__actions">
+                  <div role="button" class="sidebar-next-top-button" id="btnSources" aria-label="引用来源" title="引用来源">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                      <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm.75 9.75h-1.5V7.25h1.5v4ZM8 5.9a.9.9 0 1 1 0-1.8.9.9 0 0 1 0 1.8Z"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="detail-layout__content">
+              <div class="detail-sidebar detail-sidebar--overview-only">
+                <div class="detail-tabs" id="detailTabs">
+                  <button class="detail-tab detail-tab--active" data-tab="overview">概览</button>
+                  <button class="detail-tab" data-tab="artifacts">产物</button>
+                </div>
+              </div>
+              <div class="detail-main">
+                <div class="detail-tab-panel" id="panelOverview">
+                  <div class="cb-overview-panel" id="overviewPanel"><!-- JS 渲染 --></div>
+                </div>
+                <div class="detail-tab-panel" id="panelArtifacts" hidden>
+                  <div class="empty-state">暂无内容</div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- 引用来源 -->
+        <div class="sources-panel" id="sourcesPanel" hidden>
+          <div class="sources-panel__header">
+            <span class="sources-panel__title">引用来源 (<span id="srcCount">0</span>)</span>
+            <button type="button" class="sources-panel__close" id="btnSourcesClose" aria-label="关闭">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path fill-rule="evenodd" clip-rule="evenodd"
+                      d="M3.47 3.47a.75.75 0 0 1 1.06 0L8 6.94l3.47-3.47a.75.75 0 1 1 1.06 1.06L9.06 8l3.47 3.47a.75.75 0 1 1-1.06 1.06L8 9.06l-3.47 3.47a.75.75 0 0 1-1.06-1.06L6.94 8 3.47 4.53a.75.75 0 0 1 0-1.06Z"/>
+              </svg>
+            </button>
+          </div>
+          <div class="sources-panel__body">
+            <div class="sources-panel__list" id="sourcesList">
+              <div class="empty-state">暂无引用来源</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script>window.__WB_ICONS__ = __ICONS_JSON__;</script>
+<script src="/wb/wb_workbench.js"></script>
+</body>
+</html>

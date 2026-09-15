@@ -1,0 +1,36 @@
+# 人力资源(HR) · 岗位任务流（端到端全自动工作流）
+# 由 core/taskflow.py 在运行时按 task_id 动态编译；本文件为可评审 / 可部署的静态蓝本。
+# 数据底座：skills/task_library.json（PDF 解析生成，含 28 个任务）
+role: hr
+display: 人力资源(HR)
+trigger:
+  - HR、人力资源、招聘、JD、简历筛选、面试、入职、培训、绩效、薪酬、员工关系、人事制度、人力规划、离职、hr
+entry: MiniYuxi「岗位工作台」选任务 / 命中 trigger 词自动调用
+closed_loop_steps:
+  - "1_解析: 从 task_library.json 按 task_id 取出任务全部字段（提示词解析）"
+  - "2_材料核验: 列出已读取材料，比对'需要准备'，标注缺失（缺失不编造）"
+  - "3_变量注入: 将 variables 填入提示词 [填写] 占位符，附材料清单"
+  - "4_执行: 调用 LLM 网关(gateway.chat)运行主提示词"
+  - "5_格式化: 套用'输出格式'，生成行动项四列表(事项/负责人/截止时间/验收标准)"
+  - "6_闭环: 产出结果 + 建议追问，写 SOC 审计链；人事/制度/薪酬动作经人工确认闸门(HITL)"
+dag:
+  name: hr/<task>
+  nodes:
+    - {id: start, type: start}
+    - {id: materials, type: knowledge, label: 读取并核验材料}
+    - {id: exec, type: llm, label: 执行主提示词}
+    - {id: format, type: tool, label: 套用输出格式}
+    - {id: review, type: approval, label: 人工确认闸门(HITL)}
+    - {id: end, type: end}
+  edges:
+    - {from: start, to: materials}
+    - {from: materials, to: exec}
+    - {from: exec, to: format}
+    - {from: format, to: review}
+    - {from: review, to: end}
+tasks_total: 28
+example_tasks: [hr_05, hr_07, hr_01]
+deploy:
+  miniyuxi: "POST /api/taskflow/run  {task_id, variables, materials}"
+  workbuddy: "读取 skills/task_library.json + 本机模型执行 6 步闭环"
+  connectors_reuse: "邮箱连接器(采集简历/公文) · 飞书多维表(写入候选人/行政台账)，对齐 hr-resume"

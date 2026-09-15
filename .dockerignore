@@ -1,0 +1,10 @@
+data/
+__pycache__/
+*.pyc
+*.log
+.git
+.env
+start_miniyuxi.bat
+run.bat
+*.png
+jd_*

@@ -1,0 +1,22 @@
+services:
+  miniyuxi:
+    build: .
+    ports:
+      - "8801:8801"
+    environment:
+      - MINIYUXI_HOST=0.0.0.0
+      - MINIYUXI_PORT=8801
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_BASE_URL=${LLM_BASE_URL}
+      - LLM_MODEL=${LLM_MODEL}
+      - EMB_API_KEY=${EMB_API_KEY}
+      - EMB_BASE_URL=${EMB_BASE_URL}
+      - EMB_MODEL=${EMB_MODEL}
+      - EMB_DIM=${EMB_DIM}
+      - DOUBAO_API_KEY=${DOUBAO_API_KEY}
+      - MINIYUXI_SECRET=${MINIYUXI_SECRET}
+    volumes:
+      - miniyuxi_data:/app/data
+
+volumes:
+  miniyuxi_data:

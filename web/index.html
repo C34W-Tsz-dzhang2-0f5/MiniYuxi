@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MiniYuxi · 智能工作台</title>
+<link rel="stylesheet" href="/wb/wb_workbench.css">
+<style>
+  /* ---- MiniYuxi 文字标（替换原站图片 Logo）---- */
+  .brand-wordmark{
+    display:inline-flex;align-items:center;gap:3px;
+    font-weight:700;font-size:18px;line-height:1;color:#1a1a1a;
+    letter-spacing:.3px;font-family:Inter,'PingFang SC','Microsoft YaHei',sans-serif;
+    user-select:none;white-space:nowrap;
+  }
+  .brand-wordmark::after{content:'';width:6px;height:6px;border-radius:50%;background:#1a1a1a;display:inline-block}
+  .conversation-list-collapsed-top .brand-wordmark,
+  .cloud-welcome__logo .brand-wordmark{font-size:15px}
+  .conversation-list-collapsed-top .brand-wordmark::after,
+  .cloud-welcome__logo .brand-wordmark::after{width:5px;height:5px}
+  .msg-avatar--ai{
+    background:linear-gradient(135deg,#1a1a1a,#3a3a3a);color:#fff;
+    font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;
+  }
+
+  /* ---- 登录弹窗 ---- */
+  .my-modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999}
+  .my-modal[hidden]{display:none}
+  .my-modal__card{width:340px;max-width:92vw;background:#fff;border-radius:14px;padding:22px 22px 18px;box-shadow:0 18px 60px rgba(0,0,0,.28)}
+  .my-modal__title{font-size:16px;font-weight:700;margin:0 0 14px;color:#1a1a1a}
+  .my-modal__row{margin-bottom:12px}
+  .my-modal__row label{display:block;font-size:12px;color:#666;margin-bottom:5px}
+  .my-modal__row input{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #e2e2e2;border-radius:8px;font-size:14px;outline:none}
+  .my-modal__row input:focus{border-color:#1a1a1a}
+  .my-modal__actions{display:flex;gap:10px;justify-content:flex-end;margin-top:6px}
+  .my-modal__btn{padding:8px 16px;border:none;border-radius:8px;font-size:14px;cursor:pointer}
+  .my-modal__btn--ghost{background:#f2f2f2;color:#333}
+  .my-modal__btn--primary{background:#1a1a1a;color:#fff}
+  .my-modal__err{color:#d33;font-size:12px;min-height:16px;margin-top:4px}
+  .my-modal__hint{font-size:11px;color:#999;margin-top:10px}
+  .hidden{display:none !important}
+
+  /* ---- 顶部栏功能弹窗内容 ---- */
+  .fm-body p{margin:0 0 10px}
+  .fm-list{margin:0;padding:0;list-style:none}
+  .fm-list li{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid #f0f0f0}
+  .fm-list li:last-child{border-bottom:none}
+  .fm-list .t{flex:1;min-width:0}
+  .fm-list .s{font-size:12px;color:#999;word-break:break-all}
+  .fm-row{display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+  .fm-input{flex:1;min-width:180px;padding:8px 11px;border:1px solid #e2e2e2;border-radius:8px;font-size:14px}
+  .fm-btn{padding:8px 16px;border:none;border-radius:8px;font-size:14px;cursor:pointer;background:#1a1a1a;color:#fff}
+  .fm-btn:disabled{opacity:.5;cursor:not-allowed}
+  .fm-btn.secondary{background:#f2f2f2;color:#333}
+  .fm-drop{border:1.5px dashed #d0d0d0;border-radius:10px;padding:22px 16px;text-align:center;color:#666;cursor:pointer;transition:.15s}
+  .fm-drop:hover{border-color:#1a1a1a;color:#1a1a1a}
+  .fm-log{white-space:pre-wrap;background:#f8f8f8;border:1px solid #eee;border-radius:8px;padding:10px;font-size:12px;max-height:180px;overflow-y:auto;line-height:1.5;margin-top:10px}
+  .fm-empty{color:#999;text-align:center;padding:24px 0}
+  .fm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+  .fm-card{padding:12px;border:1px solid #e8e8e8;border-radius:10px;cursor:pointer;transition:.15s}
+  .fm-card:hover{border-color:#1a1a1a;background:#fafafa}
+  .fm-card.on{border-color:#1a1a1a;background:#f2f2f2}
+  .fm-card .n{font-weight:600;font-size:13px;margin-bottom:4px}
+  .fm-card .m{font-size:12px;color:#666}
+  #fmClose{border:none;background:transparent;font-size:16px;color:#666;cursor:pointer}
+  #fmClose:hover{background:#f2f2f2}
+  .fm-sub{font-size:13px;font-weight:600;margin:6px 0 8px}
+  .fm-form{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+  .fm-form input{width:100%;padding:8px 11px;border:1px solid #e2e2e2;border-radius:8px;font-size:14px;box-sizing:border-box}
+  .fm-card .fm-btn.sm{padding:5px 12px;font-size:12px;margin-top:8px}
+
+  /* ---- 左侧功能区菜单（WorkBuddy 1:1 复刻） ---- */
+  .tool-menu{position:fixed;left:0;top:0;width:100%;height:100%;z-index:1000;background:transparent;pointer-events:none}
+  .tool-menu[hidden]{display:none}
+  .tool-menu__panel{position:absolute;left:var(--tm-x, 16px);top:var(--tm-y, 16px);width:240px;background:var(--wb-surface);border:1px solid var(--wb-border);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.18);pointer-events:auto;display:flex;flex-direction:column;overflow:hidden}
+  .tool-menu__body{flex:1;overflow-y:auto;padding:8px 0;max-height:420px}
+  .tool-menu__item{width:100%;display:flex;align-items:center;gap:10px;padding:9px 14px;border:0;background:transparent;color:var(--wb-text);font-family:var(--wb-font-cjk);font-size:13px;text-align:left;cursor:pointer;transition:background .15s}
+  .tool-menu__item:hover{background:var(--wb-hover)}
+  .tool-menu__item .tool-menu__icon{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--wb-canvas);color:var(--wb-text-secondary)}
+  .tool-menu__item .tool-menu__icon svg{width:16px;height:16px}
+  .tool-menu__label{flex:1}
+  .tool-menu__hint{font-size:11px;color:var(--wb-text-tertiary)}
+  .tool-menu__divider{height:1px;background:var(--wb-border);margin:8px 12px}
+  .tool-menu__item--row{justify-content:space-between;padding-right:12px}
+  .tool-menu__row-left{display:flex;align-items:center;gap:10px}
+  .tool-menu__footer{padding:8px 12px;border-top:1px solid var(--wb-border);background:var(--wb-canvas)}
+  .tool-menu__footer-btn{width:100%;display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid var(--wb-border);border-radius:8px;background:var(--wb-surface);color:var(--wb-text);font-family:var(--wb-font-cjk);font-size:12px;cursor:pointer;transition:background .15s}
+  .tool-menu__footer-btn:hover{background:var(--wb-hover)}
+  .tool-menu__model{font-size:11px;color:var(--wb-text-tertiary)}
+  .tool-menu--drawer .tool-menu__panel{width:260px}
+  .tool-menu__header{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--wb-border)}
+  .tool-menu__back{width:28px;height:28px;border:0;border-radius:50%;background:transparent;color:var(--wb-text-secondary);cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .tool-menu__back:hover{background:var(--wb-hover)}
+  .tool-menu__title{font-size:14px;font-weight:600;font-family:var(--wb-font-cjk)}
+  .tool-menu__empty{color:var(--wb-text-tertiary);text-align:center;padding:24px 12px;font-size:13px}
+  .tool-menu__option{width:100%;padding:9px 14px;border:0;background:transparent;color:var(--wb-text);font-family:var(--wb-font-cjk);font-size:13px;text-align:left;cursor:pointer;display:flex;align-items:center;gap:10px;transition:background .15s}
+  .tool-menu__option:hover{background:var(--wb-hover)}
+  .tool-menu__option.on{background:var(--wb-hover-strong)}
+  .tool-menu__option-desc{font-size:11px;color:var(--wb-text-tertiary);margin-top:2px}
+  .tool-menu__file-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:6px;background:var(--wb-canvas);font-size:12px;margin-right:6px}
+  .tool-menu__file-chip button{border:0;background:transparent;color:var(--wb-text-tertiary);cursor:pointer;font-size:12px;line-height:1;padding:0 2px}
+
+  /* ---- 开关（与 WorkBuddy 同款） ---- */
+  .wb-switch{position:relative;display:inline-flex;width:36px;height:20px}
+  .wb-switch input{opacity:0;width:0;height:0}
+  .wb-switch__slider{position:absolute;inset:0;background:#d0d0d0;border-radius:999px;transition:.2s;cursor:pointer}
+  .wb-switch__slider:before{content:'';position:absolute;height:16px;width:16px;left:2px;bottom:2px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+  .wb-switch input:checked + .wb-switch__slider{background:#1a1a1a}
+  .wb-switch input:checked + .wb-switch__slider:before{transform:translateX(16px)}
+  body.dark .wb-switch input:checked + .wb-switch__slider{background:#3dd9b6}
+</style>
+<style>
+  /* ============ 多模型路由条 / 模型中心 / 对比 / 任务 ============ */
+  /* 全局兜底：hidden 属性必须真正隐藏元素（避免 .xxx{display:...} 覆盖导致浮层遮挡点击） */
+  [hidden] { display: none !important; }
+  .mx-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--wb-border-soft);
+    background:var(--wb-surface);flex-wrap:wrap}
+  .mx-seg{display:inline-flex;background:var(--wb-hover);border-radius:9px;padding:3px}
+  .mx-seg button{border:none;background:transparent;color:var(--wb-text-secondary);font-size:13px;
+    padding:5px 12px;border-radius:7px;cursor:pointer;font-family:inherit}
+  .mx-seg button:hover{color:var(--wb-text)}
+  .mx-seg button.on{background:var(--wb-primary);color:#fff;font-weight:600}
+  body.dark .mx-seg button.on{color:#101214}
+  .mx-summary{flex:1;min-width:120px;font-size:12px;color:var(--wb-text-tertiary);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mx-center-btn{border:1px solid var(--wb-border);background:var(--wb-surface);color:var(--wb-text-secondary);
+    font-size:13px;padding:5px 12px;border-radius:8px;cursor:pointer;font-family:inherit}
+  .mx-center-btn:hover{background:var(--wb-hover);color:var(--wb-text)}
+
+  /* 模型中心弹窗 */
+  .mx-wrap{display:flex;flex-direction:column;gap:16px}
+  .mx-block__h{font-size:13px;font-weight:600;color:var(--wb-text);margin-bottom:8px}
+  .mx-provs{display:flex;flex-wrap:wrap;gap:8px}
+  .mx-prov{display:flex;flex-direction:column;gap:2px;padding:6px 10px;border:1px solid var(--wb-border);
+    border-radius:8px;font-size:12px}
+  .mx-prov b{color:var(--wb-text)}
+  .mx-prov span{color:var(--wb-text-tertiary);font-size:11px}
+  .mx-prov.ok{border-color:rgba(40,170,90,.5)}
+  .mx-strats{display:flex;flex-wrap:wrap;gap:8px}
+  .mx-strat{border:1px solid var(--wb-border);background:var(--wb-surface);color:var(--wb-text-secondary);
+    border-radius:9px;padding:7px 12px;cursor:pointer;text-align:left;font-family:inherit;display:flex;flex-direction:column;gap:2px}
+  .mx-strat b{font-size:13px;color:var(--wb-text)}
+  .mx-strat span{font-size:11px;color:var(--wb-text-tertiary)}
+  .mx-strat.on{border-color:var(--wb-primary);background:var(--wb-hover-strong);color:var(--wb-text)}
+  .mx-tts{display:flex;flex-wrap:wrap;gap:6px}
+  .mx-tt{font-size:12px;padding:3px 9px;border-radius:20px;background:var(--wb-hover);color:var(--wb-text-secondary)}
+  .mx-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+  .mx-card{border:1px solid var(--wb-border);border-radius:10px;padding:9px 10px;cursor:pointer;background:var(--wb-surface)}
+  .mx-card:hover{border-color:var(--wb-text-tertiary)}
+  .mx-card.on{border-color:var(--wb-primary);background:var(--wb-hover-strong)}
+  .mx-card.cmp{border-color:#3a7bd5;background:rgba(58,123,213,.1)}
+  .mx-card.off{opacity:.55}
+  .mx-card__top{display:flex;align-items:center;justify-content:space-between;gap:6px}
+  .mx-card__top b{font-size:13px;color:var(--wb-text)}
+  .mx-card__meta{font-size:11px;color:var(--wb-text-tertiary);margin:3px 0 5px}
+  .mx-dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+  .mx-dot.ok{background:#28aa5a}
+  .mx-dot.no{background:#c33}
+  .mx-caps{display:flex;flex-wrap:wrap;gap:4px}
+  .mx-cap{font-size:10px;padding:1px 6px;border-radius:10px;background:var(--wb-hover);color:var(--wb-text-tertiary)}
+  .mx-tip{font-size:12px;color:var(--wb-text-tertiary);margin:4px 0 0}
+  .mx-tip b{color:var(--wb-text)}
+
+  /* 对比 / 路由说明 / 任务列表 */
+  .mx-route-note{font-size:11px;color:var(--wb-text-tertiary);margin-top:6px;border-top:1px dashed var(--wb-border-soft);padding-top:6px}
+  .mx-cmp{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+  .mx-cmp-item{border:1px solid var(--wb-border);border-radius:10px;padding:10px 12px;background:var(--wb-surface)}
+  .mx-cmp-item.fail{border-color:rgba(200,50,50,.5)}
+  .mx-cmp-h{font-size:12px;color:var(--wb-text-secondary);font-weight:600;margin-bottom:5px}
+  .mx-cmp-body{font-size:13px;color:var(--wb-text);white-space:pre-wrap;line-height:1.6}
+  .mx-cmp-merged{border:1px solid var(--wb-primary);border-radius:10px;padding:10px 12px;background:var(--wb-hover)}
+  .mx-tasks{display:flex;flex-direction:column;gap:12px}
+  .mx-stat-row{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--wb-text-secondary);
+    padding:9px 11px;background:var(--wb-hover);border-radius:9px}
+  .mx-task{border:1px solid var(--wb-border);border-radius:9px;padding:9px 11px}
+  .mx-task__h{font-size:12px;color:var(--wb-text);font-weight:600}
+  .mx-task__msg{font-size:12px;color:var(--wb-text-secondary);margin:4px 0;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .mx-task__meta{font-size:11px;color:var(--wb-text-tertiary)}
+
+  /* 供应商 Key 配置表单（点击供应商卡片弹出） */
+  .mx-prov{cursor:pointer;transition:border-color .15s,background .15s}
+  .mx-prov:hover{border-color:var(--wb-primary);background:var(--wb-hover)}
+  .mx-key-form{display:flex;flex-direction:column;gap:14px;max-width:540px}
+  .mx-key-form .mx-kf-row{display:flex;flex-direction:column;gap:5px}
+  .mx-key-form label{font-size:13px;font-weight:600;color:var(--wb-text)}
+  .mx-key-form .mx-kf-hint{font-size:11px;color:var(--wb-text-tertiary);font-weight:400;line-height:1.5}
+  .mx-key-form input{font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--wb-border);
+    border-radius:8px;background:var(--wb-surface);color:var(--wb-text);width:100%;box-sizing:border-box}
+  .mx-key-form input:focus{outline:none;border-color:var(--wb-primary)}
+  .mx-key-form .mx-kf-actions{display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-top:4px}
+  .mx-key-form .mx-kf-status{font-size:12px;margin-right:auto}
+  .mx-key-form .mx-kf-status.ok{color:#28aa5a}
+  .mx-key-form .mx-kf-status.err{color:#c33}
+  .mx-kf-link{font-size:12px;color:var(--wb-primary);text-decoration:none}
+  .mx-kf-link:hover{text-decoration:underline}
+  .mx-kf-secure{font-size:12px;color:var(--wb-text-secondary)}
+</style>
+</head>
+<body class="light cb-light vscode-light agent-ui-theme">
+
+<div class="teams-container" id="teamsContainer">
+
+  <!-- ============ 左：会话侧边栏 ============ -->
+  <div class="conversation-sidebar">
+    <div class="conversation-list conversation-list-collapsed" id="convList">
+
+      <!-- 折叠态 -->
+      <div class="conversation-list-collapsed-upper" id="collapsedUpper">
+        <div class="conversation-list-collapsed-top">
+          <span class="brand-wordmark">MiniYuxi</span>
+          <span class="collapsed-expand-icon">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M2.5 3.5h11M2.5 8h11M2.5 12.5h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+          </span>
+        </div>
+        <div class="conversation-list-header conversation-list-header-collapsed">
+          <button class="conversation-list-collapsed-icon-button" id="btnExpand" title="展开侧边栏" aria-label="展开侧边栏">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M14 0H0v1.33h14V0ZM14 5H0v1.33h14V5ZM0 10h7v1.33H0V10Z" fill-rule="evenodd"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- 展开态 -->
+      <div class="conversation-list-expanded" id="expandedBody">
+        <div class="conversation-list-header">
+          <div class="conversation-list-brand">
+            <span class="brand-wordmark">MiniYuxi</span>
+          </div>
+          <button class="conversation-list-collapsed-icon-button" id="btnCollapse" title="收起侧边栏" aria-label="收起侧边栏">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M14 0H0v1.33h14V0ZM14 5H0v1.33h14V5ZM0 10h7v1.33H0V10Z" fill-rule="evenodd"/>
+            </svg>
+          </button>
+        </div>
+        <button class="new-conversation-btn" id="btnNewChat">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M7.25 2.5a.75.75 0 0 1 1.5 0v4.75H13.5a.75.75 0 0 1 0 1.5H8.75v4.75a.75.75 0 0 1-1.5 0V8.75H2.5a.75.75 0 0 1 0-1.5h4.75V2.5Z"/>
+          </svg>
+          <span>新对话</span>
+        </button>
+        <div class="conversation-search">
+          <svg class="search-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85Zm-1.06-1.06a4.5 4.5 0 1 1 .001-.001Z"/>
+          </svg>
+          <input type="text" id="convSearch" placeholder="搜索对话">
+        </div>
+        <div class="conversation-list-body" id="convListBody"><!-- JS 渲染 --></div>
+      </div>
+
+      <div class="conversation-list-footer" id="convFooter">
+        <div class="sidebar-footer-collapsed-content">
+          <button class="footer-icon-btn" id="btnTheme" title="切换主题" aria-label="切换主题">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M8 1a7 7 0 1 0 7 7 5.5 5.5 0 0 1-7-7Z"/>
+            </svg>
+          </button>
+        </div>
+        <div class="sidebar-footer-expanded-content">
+          <div class="footer-user">
+            <span class="footer-avatar" aria-hidden="true" style="display:inline-flex;width:24px;height:24px;border-radius:50%;background:#1a1a1a;color:#fff;align-items:center;justify-content:center;font-size:12px;font-weight:700">M</span>
+            <span class="footer-user-name" id="footerUser">本地模式</span>
+          </div>
+          <button class="footer-icon-btn" id="btnTheme2" title="切换主题" aria-label="切换主题">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M8 1a7 7 0 1 0 7 7 5.5 5.5 0 0 1-7-7Z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============ 中：主内容 ============ -->
+  <div class="teams-content-wrapper">
+    <div class="teams-main-content">
+      <div class="cloud-welcome" id="cloudWelcome">
+
+        <header class="cloud-welcome__header">
+          <div class="cloud-welcome__header-content">
+            <a class="cloud-welcome__logo" href="#" aria-label="MiniYuxi">
+              <span class="brand-wordmark">MiniYuxi</span>
+            </a>
+            <nav class="cloud-welcome__nav" id="topNav"><!-- JS 渲染 --></nav>
+            <div class="cloud-welcome__actions">
+              <button class="wb-button wb-button--primary wb-button--medium cloud-welcome__login-btn" id="btnLogin">
+                <span class="wb-button__content">登录</span>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <main class="cloud-welcome__main">
+          <div class="main-content main-content--welcome" id="mainContent">
+            <div class="chat-container cb-font-size-uncapped chat-container--welcome" id="chatContainer">
+              <div class="wb-cb-chat" id="cbChat">
+
+                <!-- 欢迎区 -->
+                <div class="welcome-stage" id="welcomeStage">
+                  <div class="wb-home-header">
+                    <h1 class="wb-home-title">MiniYuxi, 我帮你</h1>
+                  </div>
+
+                  <div class="wb-scene-tabs" id="sceneTabs"><!-- JS 渲染 --></div>
+
+                  <section class="wb-home-composer cb-font-size-capped">
+                    <div class="wb-home-composer__chips">
+                      <div class="quick-actions-container">
+                        <div class="quick-actions quick-actions--fade-right">
+                          <div class="quick-actions__list" id="quickActions"><!-- JS 渲染 --></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="wb-home-composer__input-slot">
+                      <div class="composer-shell">
+                        <div id="refListMain"></div>
+                        <div class="composer-editable" id="composerInput"
+                             contenteditable="true" role="textbox" aria-multiline="true"
+                             data-placeholder="今天帮你做些什么？"></div>
+                        <div class="composer-bottom">
+                          <div class="composer-tools">
+                            <button class="composer-tool composer-tool--menu" id="btnToolMenu" title="工具" aria-label="工具">
+                              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                                <circle cx="8" cy="3" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="13" r="1.5"/>
+                              </svg>
+                            </button>
+                            <button class="composer-tool" data-insert="@" title="引用对话文件">
+                              <span class="tool-kbd">@</span> 引用对话文件
+                            </button>
+                            <button class="composer-tool" data-insert="/" title="调用技能与指令">
+                              <span class="tool-kbd">/</span> 调用技能与指令
+                            </button>
+                          </div>
+                          <button class="composer-send" id="btnSend" disabled aria-label="发送">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                              <path d="M2.3 7.05a1 1 0 0 1 1.4-1.4l2.05 2.05V2.5a1 1 0 0 1 2 0v5.2l2.05-2.05a1 1 0 0 1 1.4 1.4l-3.7 3.7a1 1 0 0 1-1.4 0l-3.8-3.7Z"/>
+                              <path d="M13.5 13.5h-11a1 1 0 0 1 0-2h11a1 1 0 0 1 0 2Z"/>
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="wb-input-footer">
+                      <span class="footer-hint"><b>@</b> 引用对话文件，<b>/</b> 调用技能与指令</span>
+                    </div>
+                  </section>
+                </div>
+
+                <!-- 消息区 -->
+                <div class="message-scroll" id="messageScroll" hidden>
+                  <div class="message-list" id="messageList"></div>
+                </div>
+
+                <!-- 对话态输入（贴底） -->
+                <div class="chat-dock" id="chatDock" hidden>
+                  <!-- 多模型路由条 -->
+                  <div class="mx-bar" id="modelBar">
+                    <div class="mx-seg" id="mxSeg">
+                      <button class="on" data-mode="workbench" title="走工作台 Agent（含工具/RAG）">工作台</button>
+                      <button data-mode="auto" title="按任务类型自动选模型">自动路由</button>
+                      <button data-mode="single" title="固定指定一个模型">指定模型</button>
+                      <button data-mode="compare" title="多个模型并行对比并合并">多模型对比</button>
+                    </div>
+                    <div class="mx-summary" id="mxSummary">默认：工作台模式</div>
+                    <button class="mx-center-btn" id="btnModelCenter" title="打开模型中心">模型中心</button>
+                  </div>
+                  <div class="composer-shell composer-shell--dock">
+                    <div id="refListDock"></div>
+                    <div class="composer-editable" id="composerInputDock"
+                         contenteditable="true" role="textbox" aria-multiline="true"
+                         data-placeholder="继续对话…"></div>
+                    <div class="composer-bottom">
+                      <div class="composer-tools">
+                        <button class="composer-tool composer-tool--menu" id="btnToolMenuDock" title="工具" aria-label="工具">
+                          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                            <circle cx="8" cy="3" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="13" r="1.5"/>
+                          </svg>
+                        </button>
+                        <button class="composer-tool" data-insert="@" data-target="composerInputDock" title="引用对话文件">
+                          <span class="tool-kbd">@</span>
+                        </button>
+                        <button class="composer-tool" data-insert="/" data-target="composerInputDock" title="调用技能与指令">
+                          <span class="tool-kbd">/</span>
+                        </button>
+                      </div>
+                      <button class="composer-send" id="btnSendDock" disabled aria-label="发送">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                          <path d="M2.3 7.05a1 1 0 0 1 1.4-1.4l2.05 2.05V2.5a1 1 0 0 1 2 0v5.2l2.05-2.05a1 1 0 0 1 1.4 1.4l-3.7 3.7a1 1 0 0 1-1.4 0l-3.8-3.7Z"/>
+                          <path d="M13.5 13.5h-11a1 1 0 0 1 0-2h11a1 1 0 0 1 0 2Z"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </main>
+
+      </div>
+      <div class="route-keep-alive-slot route-keep-alive-slot--hidden"></div>
+    </div>
+  </div>
+
+  <!-- ============ 右：详情面板 ============ -->
+  <div class="detail-panel-container" id="detailPanelContainer">
+    <div class="sidebar-next">
+      <div class="sidebar-next-body">
+        <div class="detail-panel detail-panel--no-header" id="detailPanel">
+          <div class="detail-layout detail-layout--stacked">
+            <div class="detail-layout__top">
+              <div class="sidebar-next-main-header">
+                <div class="sidebar-next-main-header__left">
+                  <div class="sidebar-next-overview-trigger">
+                    <div role="button" class="sidebar-next-top-button sidebar-next-top-button--menu"
+                         id="btnToggleDetail" aria-label="收起面板" title="收起面板">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <path d="M14 0H0v1.33h14V0ZM14 5H0v1.33h14V5ZM0 10h7v1.33H0V10Z" fill-rule="evenodd"/>
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+                <div class="sidebar-next-main-header__actions">
+                  <div role="button" class="sidebar-next-top-button" id="btnSources" aria-label="引用来源" title="引用来源">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                      <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm.75 9.75h-1.5V7.25h1.5v4ZM8 5.9a.9.9 0 1 1 0-1.8.9.9 0 0 1 0 1.8Z"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="detail-layout__content">
+              <div class="detail-sidebar detail-sidebar--overview-only">
+                <div class="detail-tabs" id="detailTabs">
+                  <button class="detail-tab detail-tab--active" data-tab="overview">概览</button>
+                  <button class="detail-tab" data-tab="artifacts">产物</button>
+                  <button class="detail-tab" data-tab="models">模型任务</button>
+                </div>
+              </div>
+              <div class="detail-main">
+                <div class="detail-tab-panel" id="panelOverview">
+                  <div class="cb-overview-panel" id="overviewPanel"><!-- JS 渲染 --></div>
+                </div>
+                <div class="detail-tab-panel" id="panelArtifacts" hidden>
+                  <div class="empty-state">暂无内容</div>
+                </div>
+                <div class="detail-tab-panel" id="panelModelTasks" hidden>
+                  <div class="mx-tasks">
+                    <div class="mx-stats" id="mxStats"><div class="empty-state">加载中…</div></div>
+                    <div id="mxTaskList"><div class="empty-state">暂无任务</div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- 引用来源 -->
+        <div class="sources-panel" id="sourcesPanel" hidden>
+          <div class="sources-panel__header">
+            <span class="sources-panel__title">引用来源 (<span id="srcCount">0</span>)</span>
+            <button type="button" class="sources-panel__close" id="btnSourcesClose" aria-label="关闭">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path fill-rule="evenodd" clip-rule="evenodd"
+                      d="M3.47 3.47a.75.75 0 0 1 1.06 0L8 6.94l3.47-3.47a.75.75 0 1 1 1.06 1.06L9.06 8l3.47 3.47a.75.75 0 1 1-1.06 1.06L8 9.06l-3.47 3.47a.75.75 0 0 1-1.06-1.06L6.94 8 3.47 4.53a.75.75 0 0 1 0-1.06Z"/>
+              </svg>
+            </button>
+          </div>
+          <div class="sources-panel__body">
+            <div class="sources-panel__list" id="sourcesList">
+              <div class="empty-state">暂无引用来源</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<!-- 左侧功能区菜单：添加文件 / 引用 / 模式 / 专家 / 技能 / 连接器 / 允许完全访问 -->
+<div class="tool-menu" id="toolMenu" hidden>
+  <div class="tool-menu__panel" tabindex="-1">
+    <div class="tool-menu__body">
+      <button class="tool-menu__item" data-action="add-file">
+        <span class="tool-menu__icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8.5 2.5v11M4 8h9"/></svg>
+        </span>
+        <span class="tool-menu__label">添加文件</span>
+      </button>
+      <button class="tool-menu__item" data-action="ref-file">
+        <span class="tool-menu__icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 7.5h5c1.7 0 3 1.3 3 3s-1.3 3-3 3H7M4 7.5l2.5-2M4 7.5l2.5 2"/></svg>
+        </span>
+        <span class="tool-menu__label">引用对话中的文件</span>
+      </button>
+      <button class="tool-menu__item" data-action="mode">
+        <span class="tool-menu__icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2.5 8h2M7.5 8h2M12.5 8h1"/></svg>
+        </span>
+        <span class="tool-menu__label">模式</span>
+        <span class="tool-menu__hint" id="modeHint">默认</span>
+      </button>
+      <button class="tool-menu__item" data-action="expert">
+        <span class="tool-menu__icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="5" r="2.5"/><path d="M3 13.5c0-2.8 2.2-5 5-5s5 2.2 5 5"/></svg>
+        </span>
+        <span class="tool-menu__label">专家</span>
+        <span class="tool-menu__hint" id="expertHint">未选择</span>
+      </button>
+      <button class="tool-menu__item" data-action="skill">
+        <span class="tool-menu__icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2.5l1.5 3.5 3.5.5-2.5 2.5.5 3.5-3-1.5-3 1.5.5-3.5-2.5-2.5 3.5-.5z"/></svg>
+        </span>
+        <span class="tool-menu__label">技能</span>
+        <span class="tool-menu__hint" id="skillHint">未选择</span>
+      </button>
+      <button class="tool-menu__item" data-action="connector">
+        <span class="tool-menu__icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 8h8M8 4v8M3 3h2M11 3h2M3 13h2M11 13h2"/></svg>
+        </span>
+        <span class="tool-menu__label">连接器</span>
+        <span class="tool-menu__hint" id="connectorHint">未选择</span>
+      </button>
+      <div class="tool-menu__divider"></div>
+      <div class="tool-menu__item tool-menu__item--row" data-action="allow-access">
+        <div class="tool-menu__row-left">
+          <span class="tool-menu__icon">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2.5l5.5 3v5L8 13.5 2.5 10.5v-5z"/><path d="M8 8.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/></svg>
+          </span>
+          <span class="tool-menu__label">允许完全访问</span>
+        </div>
+        <label class="wb-switch">
+          <input type="checkbox" id="allowFullAccess" checked>
+          <span class="wb-switch__slider"></span>
+        </label>
+      </div>
+    </div>
+    <div class="tool-menu__footer">
+      <button class="tool-menu__footer-btn" id="toolMenuModelBtn">
+        <span>共消耗 <b id="toolMenuCost">0.0000</b></span>
+        <span class="tool-menu__model" id="toolMenuModel">均衡 · —</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- 模式/专家/技能/连接器 二级抽屉面板 -->
+<div class="tool-menu tool-menu--drawer" id="toolDrawer" hidden>
+  <div class="tool-menu__panel" tabindex="-1">
+    <div class="tool-menu__header">
+      <button class="tool-menu__back" id="toolDrawerBack" aria-label="返回">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M10 3L5 8l5 5"/></svg>
+      </button>
+      <span class="tool-menu__title" id="toolDrawerTitle">选择</span>
+    </div>
+    <div class="tool-menu__body" id="toolDrawerBody"></div>
+  </div>
+</div>
+
+<input type="file" id="fileInput" class="hidden" multiple accept=".txt,.md,.docx,.pdf">
+
+<!-- 通用功能弹窗（顶部栏 知识库 / 导入 / 流程 / 模型切换 / 成本管理） -->
+<div class="my-modal" id="featureModal" hidden>
+  <div class="my-modal__card" style="width:92vw;max-width:560px;max-height:80vh;display:flex;flex-direction:column;padding:0">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid #e8e8e8;flex:none">
+      <p class="my-modal__title" id="fmTitle" style="margin:0">功能</p>
+      <button class="icon-btn" id="fmClose" aria-label="关闭" style="width:28px;height:28px;border-radius:8px">✕</button>
+    </div>
+    <div id="fmBody" style="padding:18px 20px;overflow-y:auto;flex:1;font-size:14px;line-height:1.6"></div>
+    <div id="fmFoot" style="padding:12px 20px;border-top:1px solid #e8e8e8;flex:none;display:flex;gap:10px;justify-content:flex-end"></div>
+  </div>
+</div>
+
+<script>window.__WB_ICONS__ = __ICONS_JSON__;</script>
+<script src="/wb/wb_workbench.js"></script>
+</body>
+</html>

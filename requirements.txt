@@ -1,0 +1,18 @@
+# MiniYuxi 运行依赖（全部 pip 直装，零外部服务）
+# 说明：以下包在本机隔离 venv 中均已就绪，此文件用于新环境复现。
+
+fastapi>=0.110
+uvicorn>=0.27
+requests>=2.31
+python-multipart>=0.0.9
+
+# 向量检索：sqlite-vec（SQLite 扩展，纯 C，无服务进程）
+sqlite-vec>=0.1.6
+
+# 文档解析（按需）
+python-docx>=1.1      # .docx
+pymupdf>=1.24         # .pdf（首选）
+pypdf>=4.2            # .pdf（兜底）
+
+# 可选：重排序 / BM25（当前版本用 SQLite FTS5 内置 bm25()，rank_bm25 仅备用）
+rank-bm25>=0.2.2
