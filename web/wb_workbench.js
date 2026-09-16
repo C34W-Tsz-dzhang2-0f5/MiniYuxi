@@ -36,12 +36,11 @@
     });
   }
 
-  /* 确保拿到 token：已有则直接返回；否则用默认账号静默登录（default/admin/admin123）。 */
+  /* U1：不再用默认账号静默登录。
+     无 token 时返回空串，由调用方引导登录；登录态与 LAN 口令守卫联动。 */
   function ensureToken() {
     if (TOKEN) return Promise.resolve(TOKEN);
-    return login('default', 'admin', 'admin123')
-      .then(function () { return TOKEN; })
-      .catch(function () { return ''; });
+    return Promise.resolve('');
   }
 
   /* ---------------- 静态数据（文案） ---------------- */
@@ -52,7 +51,6 @@
     { label: '流程', action: 'flow' },
     { label: '模型切换', action: 'model' },
     { label: '成本管理', action: 'cost' },
-    { label: '工作台', action: 'legacy' },
     { label: '管理', action: 'admin' },
     { label: '岗位工作台', action: 'roles' }
   ];
@@ -92,6 +90,7 @@
   var state = {
     scene: '日常办公',
     messages: [],
+    activeConvo: '',
     busy: false,
     sources: [],
     modelMode: 'workbench',   // workbench | auto | single | compare
@@ -136,15 +135,51 @@
     }, 2000);
   }
 
-  /* ---------------- 渲染：顶部导航 ---------------- */
+  /* ---------------- L1：抽屉断点判定（与 CSS @media max-width:1024px 对齐） ---------------- */
+  var detailDrawer = null;
+  function isDrawerMode() {
+    try { return window.matchMedia('(max-width: 1024px)').matches; } catch (e) { return window.innerWidth <= 1024; }
+  }
+
+  /* ---------------- 渲染：顶部导航（L2：窄屏溢出进「更多」菜单） ---------------- */
   function renderNav() {
     var nav = $('#topNav');
     nav.innerHTML = NAV_ITEMS.map(function (n) {
       return '<a class="cloud-welcome__nav-item" data-action="' + n.action + '" href="javascript:void(0)">' + n.label + '</a>';
-    }).join('');
+    }).join('') +
+      '<button class="nav-more" id="btnNavMore" aria-haspopup="true" aria-expanded="false" title="更多功能">更多' +
+      '<svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">' +
+      '<path d="M8 11.5 2.5 6h11L8 11.5Z"/></svg></button>' +
+      '<div class="nav-more-menu" id="navMoreMenu" hidden>' +
+      NAV_ITEMS.map(function (n) {
+        return '<button type="button" data-action="' + n.action + '">' + n.label + '</button>';
+      }).join('') + '</div>';
+
     $$('#topNav .cloud-welcome__nav-item').forEach(function (a) {
       a.addEventListener('click', function () { handleNavAction(a.dataset.action); });
     });
+
+    var moreBtn = $('#btnNavMore'), menu = $('#navMoreMenu');
+    if (moreBtn && menu) {
+      var closeMenu = function () {
+        if (!menu.hidden) { menu.hidden = true; moreBtn.setAttribute('aria-expanded', 'false'); }
+      };
+      moreBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var willOpen = menu.hidden;
+        menu.hidden = !willOpen;
+        moreBtn.setAttribute('aria-expanded', String(willOpen));
+      });
+      $$('#navMoreMenu button').forEach(function (b) {
+        b.addEventListener('click', function (e) {
+          e.stopPropagation();
+          closeMenu();
+          handleNavAction(b.dataset.action);
+        });
+      });
+      document.addEventListener('click', closeMenu);
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
+    }
   }
 
   /* ---------------- 顶部导航动作分发 ---------------- */
@@ -158,7 +193,6 @@
       case 'cost': openCostModal(); break;
       case 'admin': openAdminModal(); break;
       case 'roles': openTaskFlowModal(); break;
-      case 'legacy': window.open('/legacy', '_blank'); break;
       default: toast('功能入口：' + action);
     }
   }
@@ -249,6 +283,7 @@
   }
 
   function startNewChat() {
+    carryDraft('#composerInputDock', '#composerInput');   // L5：把对话态草稿带回欢迎态
     state.messages = [];
     state.sources = [];
     $('#messageList').innerHTML = '';
@@ -263,9 +298,12 @@
     opts = opts || {};
     opts.headers = opts.headers || {};
     opts.headers['Authorization'] = 'Bearer ' + TOKEN;
-    return ensureToken().then(function () {
-      opts.headers['Authorization'] = 'Bearer ' + TOKEN;
-      return fetch(url, opts);
+    return fetch(url, opts).then(function (r) {
+      if (r.status === 401) {   // U1：未登录 → 引导登录，不再静默降级
+        if (!document.getElementById('loginModal')) showLoginModal();
+        throw new Error('未登录');
+      }
+      return r;
     });
   }
 
@@ -880,22 +918,80 @@
     }).join('') : '<div class="empty-state">无匹配对话</div>';
 
     $$('#convListBody .conv-item').forEach(function (el) {
-      el.addEventListener('click', function () {
-        $$('#convListBody .conv-item').forEach(function (x) { x.classList.remove('is-active'); });
-        el.classList.add('is-active');
-        if (window.innerWidth <= 768) collapseSidebar();
-        toast('已切换：' + el.textContent.trim());
-      });
+      el.addEventListener('click', function () { selectConvo(el.dataset.id, el); });
     });
+  }
+
+  /* U2：切换到某会话：加载其历史消息（localStorage 持久化） */
+  /* L5：欢迎态 ↔ 对话态草稿互通，避免切换/打开历史会话时把已输入内容弄丢 */
+  function carryDraft(fromSel, toSel) {
+    var from = $(fromSel), to = $(toSel);
+    if (!from || !to) return;
+    var txt = (from.textContent || '').trim();
+    if (!txt) return;
+    if ((to.textContent || '').trim()) return;   // 目标已有内容则不覆盖
+    to.textContent = txt;
+    from.textContent = '';
+    if (typeof syncSend === 'function') syncSend();
+  }
+
+  function selectConvo(id, el) {
+    // L5：打开历史会话前，把欢迎态草稿带到对话态输入框
+    carryDraft('#composerInput', '#composerInputDock');
+    $$('#convListBody .conv-item').forEach(function (x) { x.classList.remove('is-active'); });
+    if (el) el.classList.add('is-active');
+    state.activeConvo = id;
+    state.messages = loadMsgs(id) || [];
+    $('#messageList').innerHTML = '';
+    if (state.messages.length) {
+      state.messages.forEach(function (m) { renderMessage(m.role, m.text); });
+      enterChatMode();
+    } else {
+      $('#welcomeStage').hidden = false;
+      $('#messageScroll').hidden = true;
+      $('#chatDock').hidden = true;
+    }
+    if (window.innerWidth <= 768) collapseSidebar();
+  }
+
+  /* U2：新建会话（首条消息触发） */
+  function newConvo(firstText) {
+    var id = 'c' + Date.now();
+    var title = (firstText || '新对话').replace(/\s+/g, ' ').slice(0, 18) || '新对话';
+    CONVERSATIONS.unshift({ id: id, title: title, time: '刚刚' });
+    saveConvos(CONVERSATIONS);
+    state.activeConvo = id;
+    state.messages = [];
+    renderConversations();
+    return id;
   }
 
   /* ---------------- 渲染：概览 ---------------- */
   function renderOverview() {
-    $('#overviewPanel').innerHTML = OVERVIEW.map(function (o) {
-      return '<div class="ov-card"><div class="ov-row"><span class="ov-key">' + o.key +
-             '</span><span class="ov-val">' + o.val + '</span></div>' +
-             '<div class="ov-progress"><i style="width:' + o.pct + '%"></i></div></div>';
-    }).join('');
+    // V4：先静态占位，再尝试实时回填（/api/wb/stats 需鉴权，未登录则保留占位）
+    var rows = [
+      { key: '会话数', val: CONVERSATIONS.length, pct: Math.min(100, CONVERSATIONS.length * 12) },
+      { key: '知识库文档', val: 26, pct: 78 },
+      { key: '已注册工具', val: 12, pct: 45 },
+      { key: '评估结果（Pass@1）', val: '87%', pct: 87 }
+    ];
+    function paint(rs) {
+      $('#overviewPanel').innerHTML = rs.map(function (o) {
+        return '<div class="ov-card"><div class="ov-row"><span class="ov-key">' + o.key +
+               '</span><span class="ov-val">' + o.val + '</span></div>' +
+               '<div class="ov-progress"><i style="width:' + o.pct + '%"></i></div></div>';
+      }).join('');
+    }
+    paint(rows);
+    fetch('/api/wb/stats', { headers: { 'Authorization': 'Bearer ' + TOKEN } })
+      .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+      .then(function (d) {
+        if (!d) return;
+        if (d.kb_docs != null) { rows[1].val = d.kb_docs; rows[1].pct = Math.min(100, d.kb_docs * 3); }
+        if (d.tool_count != null) { rows[2].val = d.tool_count; rows[2].pct = Math.min(100, d.tool_count * 5); }
+        if (d.pass_rate != null) { rows[3].val = d.pass_rate + '%'; rows[3].pct = Math.min(100, d.pass_rate); }
+        paint(rows);
+      }).catch(function () {});
   }
 
   /* ---------------- 侧边栏 ---------------- */
@@ -918,7 +1014,28 @@
     $('#chatDock').hidden = false;
   }
 
-  function addMessage(role, text) {
+  /* U8：极简 Markdown → HTML（转义优先，避免 XSS） */
+  function escHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function mdToHtml(src) {
+    if (!src) return '';
+    var s = escHtml(src);
+    s = s.replace(/```([\s\S]*?)```/g, function (_, c) {
+      return '<pre class="md-pre"><code>' + c.replace(/^\n/, '').replace(/\n$/, '') + '</code></pre>';
+    });
+    s = s.replace(/`([^`\n]+)`/g, '<code class="md-code">$1</code>');
+    s = s.replace(/^###\s+(.*)$/gm, '<h4>$1</h4>')
+         .replace(/^##\s+(.*)$/gm, '<h3>$1</h3>')
+         .replace(/^#\s+(.*)$/gm, '<h2>$1</h2>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/^\s*[-*]\s+(.*)$/gm, '<li>$1</li>');
+    s = s.replace(/(<li>[\s\S]*?<\/li>)(?=\s*<li>|$)/g, function (m) { return '<ul>' + m + '</ul>'; });
+    return s;
+  }
+
+  /* 渲染单条消息（U7 操作条：复制 / 重试；U8 Markdown） */
+  function renderMessage(role, text) {
     var wrap = document.createElement('div');
     wrap.className = 'msg msg--' + (role === 'user' ? 'user' : 'assistant');
     var avatar = role === 'user'
@@ -926,10 +1043,31 @@
       : '<div class="msg-avatar msg-avatar--ai">M</div>';
     wrap.innerHTML = avatar + '<div class="msg-body"><div class="msg-bubble"></div><div class="msg-meta">' +
       new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) + '</div></div>';
-    wrap.querySelector('.msg-bubble').textContent = text;
+    wrap.querySelector('.msg-bubble').innerHTML = mdToHtml(text);
+    var bar = document.createElement('div');
+    bar.className = 'msg-actions';
+    bar.innerHTML = '<button class="msg-act" data-act="copy">复制</button><button class="msg-act" data-act="retry">重试</button>';
+    wrap.querySelector('.msg-body').appendChild(bar);
+    bar.querySelector('[data-act="copy"]').addEventListener('click', function () {
+      if (navigator.clipboard) navigator.clipboard.writeText(text);
+      toast('已复制');
+    });
+    bar.querySelector('[data-act="retry"]').addEventListener('click', function () {
+      var last = null;
+      for (var i = state.messages.length - 1; i >= 0; i--) {
+        if (state.messages[i].role === 'user') { last = state.messages[i].text; break; }
+      }
+      if (last) send(last, $('#composerInput'));
+    });
     $('#messageList').appendChild(wrap);
     scrollBottom();
     return wrap;
+  }
+
+  function addMessage(role, text) {
+    state.messages.push({ role: role, text: text });
+    saveMsgs(state.activeConvo, state.messages);   // U2：持久化到本会话
+    return renderMessage(role, text);
   }
 
   function scrollBottom() {
@@ -947,20 +1085,37 @@
     });
   }
 
+  /* L8：流式渲染优化——rAF 对齐帧 + 自适应步长 + 滚动降频 */
   function streamBubble(node, text) {
     return new Promise(function (resolve) {
-      var i = 0, step = 4;
-      var timer = setInterval(function () {
-        i += step;
-        node.querySelector('.msg-bubble').textContent = text.slice(0, i);
+      var bubble = node.querySelector('.msg-bubble');
+      if (!bubble) { resolve(); return; }
+      var len = text.length;
+      var reduce = false;
+      try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+      if (reduce || len < 48) { bubble.innerHTML = mdToHtml(text); scrollBottom(); resolve(); return; }
+
+      var step = Math.max(4, Math.ceil(len / 150));   // 长文本约 150 帧走完，不再线性拖沓
+      var i = 0, lastScroll = 0;
+      var raf = window.requestAnimationFrame || function (cb) { return setTimeout(function () { cb(Date.now()); }, 16); };
+
+      function tick(ts) {
+        ts = ts || Date.now();
+        i = Math.min(len, i + step);
+        bubble.textContent = text.slice(0, i);
+        if (!lastScroll || ts - lastScroll > 80) { scrollBottom(); lastScroll = ts; }
+        if (i < len) { raf(tick); return; }
+        bubble.innerHTML = mdToHtml(text);   // 收尾一次性渲染 Markdown
         scrollBottom();
-        if (i >= text.length) { clearInterval(timer); resolve(); }
-      }, 16);
+        resolve();
+      }
+      raf(tick);
     });
   }
 
   function send(text, inputEl) {
     if (!text || state.busy) return;
+    if (!TOKEN) { showLoginModal(); toast('请先登录后再对话'); return; }   // U1：无 token 引导登录
 
     // ===== 多模型：对比模式 =====
     if (state.modelMode === 'compare') {
@@ -999,6 +1154,9 @@
       model = localStorage.getItem('wb_model') || '';
     } catch (e) {}
     var api = ensureToken().then(function () {
+      if (!TOKEN) {   // U1：无 token 不再静默降级，直接引导登录
+        throw new Error('未登录');
+      }
       return fetch('/api/wb/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN },
@@ -1060,6 +1218,12 @@
     var existing = $('#loginModal');
     if (existing) { existing.hidden = false; return; }
 
+    /* U1：默认口令提示只在回环地址（本机开发）显示，对外暴露时不再打印凭据 */
+    var isLoopback = false;
+    try {
+      isLoopback = /^(localhost|127\.0\.0\.1|\[::1\]|::1)$/.test(location.hostname);
+    } catch (e) {}
+
     var modal = document.createElement('div');
     modal.className = 'my-modal';
     modal.id = 'loginModal';
@@ -1068,13 +1232,18 @@
         '<p class="my-modal__title">登录 MiniYuxi</p>' +
         '<div class="my-modal__row"><label>租户</label><input id="lmTenant" value="default"></div>' +
         '<div class="my-modal__row"><label>用户名</label><input id="lmUser" value="admin"></div>' +
-        '<div class="my-modal__row"><label>密码</label><input id="lmPass" type="password" placeholder="默认 admin123"></div>' +
+        '<div class="my-modal__row"><label>密码</label><input id="lmPass" type="password" placeholder="' +
+          (isLoopback ? '默认 admin123' : '请输入密码') + '"></div>' +
         '<div class="my-modal__err" id="lmErr"></div>' +
         '<div class="my-modal__actions">' +
           '<button class="my-modal__btn my-modal__btn--ghost" id="lmCancel">取消</button>' +
           '<button class="my-modal__btn my-modal__btn--primary" id="lmOk">登录</button>' +
         '</div>' +
-        '<div class="my-modal__hint">默认账号：default / admin / admin123（本地模式）</div>' +
+        '<div class="my-modal__hint">' +
+          (isLoopback
+            ? '本机默认账号：default / admin / admin123，登录后请及时改密'
+            : '请使用管理员分配的账号登录；对外访问请先在服务端完成口令加固') +
+        '</div>' +
       '</div>';
     document.body.appendChild(modal);
 
@@ -1112,7 +1281,7 @@
   state.expertName = '';
   state.skill = '';
   state.connectorIds = [];
-  state.allowFullAccess = true;
+  state.allowFullAccess = false;   // L4：默认受限，需用户显式开启「允许完全访问」
   state.files = []; // {id,name,status}
 
   function modeLabel(m) { for (var i=0;i<MODES.length;i++) if (MODES[i].id===m) return MODES[i].label; return '默认'; }
@@ -1207,12 +1376,24 @@
       var host = $(pair[1]);
       if (!host) return;
       if (!state.files.length) { host.innerHTML = ''; return; }
-      host.innerHTML = '<div class="ref-list">' + state.files.map(function (f) {
-        return '<span class="ref-list__item" data-name="' + f.name + '">' +
-               (f.name) + (f.status === '已附加' ? '' : ' · ' + f.status) + '</span>';
+      host.innerHTML = '<div class="ref-list">' + state.files.map(function (f, idx) {
+        var st = f.status === '已附加' ? '' : ' · ' + f.status;
+        return '<span class="ref-list__item" data-idx="' + idx + '">' +
+               '<span class="ref-name">' + f.name + '</span>' + st +
+               '<button class="ref-remove" data-idx="' + idx + '" title="移除" aria-label="移除">×</button></span>';
       }).join('') + '</div>';
       $$('#' + pair[1].slice(1) + ' .ref-list__item').forEach(function (el) {
-        el.addEventListener('click', function () { insertAtCursor($(pair[0]), '@' + el.dataset.name + ' '); });
+        el.addEventListener('click', function (e) {
+          if (e.target.classList.contains('ref-remove')) return;
+          insertAtCursor($(pair[0]), '@' + el.querySelector('.ref-name').textContent + ' ');
+        });
+      });
+      $$('#' + pair[1].slice(1) + ' .ref-remove').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          state.files.splice(parseInt(btn.dataset.idx, 10), 1);   // U9：移除附件
+          renderRefList();
+        });
       });
     });
   }
@@ -1332,11 +1513,14 @@
     $('#btnLogin').addEventListener('click', showLoginModal);
 
     $('#btnNewChat').addEventListener('click', function () {
+      carryDraft('#composerInputDock', '#composerInput');   // L5
       state.messages = [];
+      state.activeConvo = '';
       $('#messageList').innerHTML = '';
       $('#welcomeStage').hidden = false;
       $('#messageScroll').hidden = true;
       $('#chatDock').hidden = true;
+      renderConversations();
       if (window.innerWidth <= 768) collapseSidebar();
     });
 
@@ -1373,6 +1557,8 @@
 
     // 详情面板
     $('#btnToggleDetail').addEventListener('click', function () {
+      // L1：窄屏下该按钮语义变为「关闭抽屉」
+      if (isDrawerMode() && detailDrawer.open()) { detailDrawer.close(); return; }
       $('#detailPanelContainer').classList.add('is-collapsed');
     });
     var dtPanels = { overview: '#panelOverview', artifacts: '#panelArtifacts', models: '#panelModelTasks' };
@@ -1386,6 +1572,46 @@
         });
         if (tab === 'models') loadModelTasks();
       });
+    });
+
+    /* L1：≤1024px 右栏改抽屉——头部按钮唤出、遮罩点击/Esc 关闭 */
+    var drawer = $('#detailPanelContainer');
+    var drawerBtn = $('#btnDetailDrawer');
+    var drawerMask = $('#detailPanelDrawerBackdrop');
+
+    detailDrawer = {
+      open: function () { return !!(drawer && drawer.classList.contains('is-drawer-open')); },
+      close: function () {
+        if (drawer) drawer.classList.remove('is-drawer-open');
+        if (drawerMask) {
+          drawerMask.classList.remove('is-open');
+          setTimeout(function () { if (!drawerMask.classList.contains('is-open')) drawerMask.hidden = true; }, 240);
+        }
+        if (drawerBtn) drawerBtn.setAttribute('aria-expanded', 'false');
+      },
+      toggle: function () {
+        if (!drawer) return;
+        var willOpen = !drawer.classList.contains('is-drawer-open');
+        drawer.classList.toggle('is-drawer-open', willOpen);
+        if (willOpen) drawer.classList.remove('is-collapsed');
+        if (drawerMask) {
+          if (willOpen) {
+            drawerMask.hidden = false;
+            requestAnimationFrame(function () { drawerMask.classList.add('is-open'); });
+          } else { detailDrawer.close(); }
+        }
+        if (drawerBtn) drawerBtn.setAttribute('aria-expanded', String(willOpen));
+      }
+    };
+
+    if (drawerBtn) drawerBtn.addEventListener('click', function () { detailDrawer.toggle(); });
+    if (drawerMask) drawerMask.addEventListener('click', function () { detailDrawer.close(); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && detailDrawer.open()) detailDrawer.close();
+    });
+    // 视口变宽离开抽屉断点时复位，避免固定定位残留
+    window.addEventListener('resize', function () {
+      if (!isDrawerMode() && detailDrawer.open()) detailDrawer.close();
     });
 
     $('#btnSources').addEventListener('click', function () { $('#sourcesPanel').hidden = false; });
@@ -1459,6 +1685,15 @@
     // 添加文件 → 隐藏 input
     $('#fileInput').addEventListener('change', function () { handleAddFile(this.files); this.value = ''; });
 
+    // U10：⌘K / Ctrl+K 聚焦输入框（快捷命令入口）
+    document.addEventListener('keydown', function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        var box = (state.activeConvo ? $('#composerInputDock') : $('#composerInput'));
+        if (box) box.focus();
+      }
+    });
+
     // 底部消耗/模型按钮：打开成本管理弹窗
     $('#toolMenuModelBtn').addEventListener('click', function () { closeToolMenu(); openCostModal(); });
   }
@@ -1480,13 +1715,13 @@
     updateModelBar();
     syncSend();
     refreshToolFooter();
-    // 预登录：静默获取 token，保证首次对话即走真实后端
-    ensureToken().then(function () {
-      if (TOKEN) {
-        var fu = $('#footerUser');
-        if (fu) { try { var r = localStorage.getItem('miniyuxi_role'); fu.textContent = r ? '管理员（' + r + '）' : '已登录'; } catch (e) {} }
-      }
-    });
+    // U1/U3：不再静默登录；已登录显示状态，否则提示「未登录」
+    var fu = $('#footerUser');
+    if (TOKEN) {
+      if (fu) { try { var r = localStorage.getItem('miniyuxi_role'); fu.textContent = r ? ('管理员（' + r + '）') : '已登录'; } catch (e) {} }
+    } else if (fu) {
+      fu.textContent = '未登录';
+    }
   }
 
   if (document.readyState === 'loading') {

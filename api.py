@@ -1180,8 +1180,13 @@ def _wb_icons_json() -> str:
 
 @app.get("/wb")
 def wb_page():
-    html = (WEB_DIR / "wb_workbench.html").read_text(encoding="utf-8")
-    return HTMLResponse(html.replace("__ICONS_JSON__", _wb_icons_json()))
+    """V1：旧 WorkBuddy 皮肤入口已下线，统一 302 到 MiniYuxi 主界面。
+
+    说明：/wb/wb_workbench.css 与 /wb/wb_workbench.js 作为静态资源路径被
+    主界面 index.html 引用，仍保留；仅页面入口本身重定向，避免品牌割裂。
+    """
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/", status_code=302)
 
 
 @app.get("/wb/wb_workbench.css")
@@ -1475,10 +1480,11 @@ def index():
     return HTMLResponse(html.replace("__ICONS_JSON__", _wb_icons_json()))
 
 
+# V1：旧版多模块入口统一收敛到 MiniYuxi 主界面
 @app.get("/legacy")
 def legacy():
-    """保留的旧版多模块主界面（功能不丢，按需访问）。"""
-    return FileResponse(WEB_DIR / "index_legacy.html")
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/", status_code=302)
 
 
 @app.exception_handler(PermissionError)

@@ -113,8 +113,17 @@
   /* ============ 多模型路由条 / 模型中心 / 对比 / 任务 ============ */
   /* 全局兜底：hidden 属性必须真正隐藏元素（避免 .xxx{display:...} 覆盖导致浮层遮挡点击） */
   [hidden] { display: none !important; }
-  .mx-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--wb-border-soft);
+  .mx-bar{display:flex;align-items:center;gap:10px;padding:8px 24px;border-bottom:1px solid var(--wb-border-soft);
     background:var(--wb-surface);flex-wrap:wrap}
+  /* L3：路由条内容与内容区同宽对齐 */
+  .mx-bar__inner{display:flex;align-items:center;gap:10px;width:100%;
+    max-width:var(--wb-content-max);margin:0 auto;flex-wrap:wrap}
+  @media (max-width:768px){
+    .mx-bar{padding:8px 12px}
+    .mx-summary{flex:1 1 100%;min-width:0;order:3}
+    .mx-seg{flex:1 1 100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+    .mx-seg::-webkit-scrollbar{display:none}
+  }
   .mx-seg{display:inline-flex;background:var(--wb-hover);border-radius:9px;padding:3px}
   .mx-seg button{border:none;background:transparent;color:var(--wb-text-secondary);font-size:13px;
     padding:5px 12px;border-radius:7px;cursor:pointer;font-family:inherit}
@@ -207,7 +216,10 @@
       <!-- 折叠态 -->
       <div class="conversation-list-collapsed-upper" id="collapsedUpper">
         <div class="conversation-list-collapsed-top">
-          <span class="brand-wordmark">MiniYuxi</span>
+          <span class="brand-lockup">
+            <svg class="brand-logo-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" stroke="currentColor" stroke-width="2"/><path d="M7 16V8l5 5 5-5v8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span class="brand-wordmark">MiniYuxi</span>
+          </span>
           <span class="collapsed-expand-icon">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path d="M2.5 3.5h11M2.5 8h11M2.5 12.5h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
@@ -227,7 +239,10 @@
       <div class="conversation-list-expanded" id="expandedBody">
         <div class="conversation-list-header">
           <div class="conversation-list-brand">
-            <span class="brand-wordmark">MiniYuxi</span>
+            <span class="brand-lockup">
+              <svg class="brand-logo-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" stroke="currentColor" stroke-width="2"/><path d="M7 16V8l5 5 5-5v8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span class="brand-wordmark">MiniYuxi</span>
+            </span>
           </div>
           <button class="conversation-list-collapsed-icon-button" id="btnCollapse" title="收起侧边栏" aria-label="收起侧边栏">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -281,17 +296,37 @@
 
         <header class="cloud-welcome__header">
           <div class="cloud-welcome__header-content">
-            <a class="cloud-welcome__logo" href="#" aria-label="MiniYuxi">
+              <a class="cloud-welcome__logo" href="#" aria-label="MiniYuxi">
+              <svg class="brand-logo-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" stroke="currentColor" stroke-width="2"/><path d="M7 16V8l5 5 5-5v8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
               <span class="brand-wordmark">MiniYuxi</span>
             </a>
             <nav class="cloud-welcome__nav" id="topNav"><!-- JS 渲染 --></nav>
             <div class="cloud-welcome__actions">
+              <button class="detail-drawer-toggle" id="btnDetailDrawer" title="详情面板" aria-label="打开详情面板">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                  <path d="M1.5 2.5h13v11h-13v-11Zm1.5 1.5v8h10V4H3Zm6.5 1h2.5v1.5H9.5V5Z"/>
+                </svg>
+              </button>
               <button class="wb-button wb-button--primary wb-button--medium cloud-welcome__login-btn" id="btnLogin">
                 <span class="wb-button__content">登录</span>
               </button>
             </div>
           </div>
         </header>
+
+        <!-- L3：多模型路由条上移到首屏，欢迎态/对话态都常驻可见 -->
+        <div class="mx-bar" id="modelBar">
+          <div class="mx-bar__inner">
+            <div class="mx-seg" id="mxSeg">
+              <button class="on" data-mode="workbench" title="走工作台 Agent（含工具/RAG）">工作台</button>
+              <button data-mode="auto" title="按任务类型自动选模型">自动路由</button>
+              <button data-mode="single" title="固定指定一个模型">指定模型</button>
+              <button data-mode="compare" title="多个模型并行对比并合并">多模型对比</button>
+            </div>
+            <div class="mx-summary" id="mxSummary">默认：工作台模式</div>
+            <button class="mx-center-btn" id="btnModelCenter" title="打开模型中心">模型中心</button>
+          </div>
+        </div>
 
         <main class="cloud-welcome__main">
           <div class="main-content main-content--welcome" id="mainContent">
@@ -358,17 +393,6 @@
 
                 <!-- 对话态输入（贴底） -->
                 <div class="chat-dock" id="chatDock" hidden>
-                  <!-- 多模型路由条 -->
-                  <div class="mx-bar" id="modelBar">
-                    <div class="mx-seg" id="mxSeg">
-                      <button class="on" data-mode="workbench" title="走工作台 Agent（含工具/RAG）">工作台</button>
-                      <button data-mode="auto" title="按任务类型自动选模型">自动路由</button>
-                      <button data-mode="single" title="固定指定一个模型">指定模型</button>
-                      <button data-mode="compare" title="多个模型并行对比并合并">多模型对比</button>
-                    </div>
-                    <div class="mx-summary" id="mxSummary">默认：工作台模式</div>
-                    <button class="mx-center-btn" id="btnModelCenter" title="打开模型中心">模型中心</button>
-                  </div>
                   <div class="composer-shell composer-shell--dock">
                     <div id="refListDock"></div>
                     <div class="composer-editable" id="composerInputDock"
@@ -409,6 +433,9 @@
   </div>
 
   <!-- ============ 右：详情面板 ============ -->
+  <!-- L1：≤1024px 右栏抽屉的遮罩 -->
+  <div class="detail-panel-drawer-backdrop" id="detailPanelDrawerBackdrop" hidden></div>
+
   <div class="detail-panel-container" id="detailPanelContainer">
     <div class="sidebar-next">
       <div class="sidebar-next-body">
@@ -542,7 +569,7 @@
           <span class="tool-menu__label">允许完全访问</span>
         </div>
         <label class="wb-switch">
-          <input type="checkbox" id="allowFullAccess" checked>
+          <input type="checkbox" id="allowFullAccess">
           <span class="wb-switch__slider"></span>
         </label>
       </div>
