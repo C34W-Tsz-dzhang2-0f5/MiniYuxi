@@ -82,6 +82,18 @@ def _build_system_prompt(
 
     if skill:
         parts.append(f"当前调用的 Skill：{skill}。请优先按该 Skill 的方法论处理。")
+        # 若 skill 是 skills/ 文件夹中的 Agent Skill（name 匹配），注入其 SKILL.md 正文
+        # 这样在 UI 点选某文件夹 skill 后，模型能真正拿到该 skill 的工作流，而非仅知道名字
+        try:
+            from . import skills_catalog
+            sk = skills_catalog.load_skill(skill)
+            if sk and sk.get("body"):
+                body = sk["body"].strip()
+                if len(body) > 4000:
+                    body = body[:4000] + "\n…（已截断，完整内容见 SKILL.md）"
+                parts.append("【Skill 工作流正文】\n" + body)
+        except Exception:
+            pass
 
     if connector_ids:
         parts.append(f"可用连接器：{', '.join(connector_ids)}。必要时可说明需要哪个连接器获取数据。")

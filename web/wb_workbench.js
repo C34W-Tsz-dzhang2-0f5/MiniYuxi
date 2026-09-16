@@ -1269,6 +1269,10 @@
     wbFetch('/api/skills/list').then(function (r) { return r.json(); }).then(function (d) {
       var list = (d && d.skills) || [];
       openDrawer('技能', list.map(function (s) {
+        if (s.type === 'folder') {
+          var trig = s.trigger ? (' · 触发：' + s.trigger) : '';
+          return { id: s.name, title: s.name, sub: '【文件夹技能】' + (s.description || '') + trig };
+        }
         return { id: s.id, title: ('question' in s ? s.question : (s.name || s.id)), sub: (s.tags && s.tags.join(', ')) || '' };
       }), {
         isActive: function (it) { return String(it.id) === String(state.skill); },

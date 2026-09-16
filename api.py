@@ -47,6 +47,11 @@ import core.experts as experts
 import core.model_hub as model_hub
 import core.rag_adapter as rag_adapter  # A 方案：外部 RAGFlow/FastGPT 适配层（可选后端）
 import core.taskflow as taskflow  # 岗位任务流引擎：提示词解析 → 自动执行闭环
+# ---- 劳动关系 / 薪酬 / 简历规则引擎（第四、五模块补充，移植自 hr-ai-workbench）----
+import core.labor_relations as labor_relations
+import core.salary_records as salary_records
+import core.resume_screening as resume_screening
+import core.backup as backup
 
 # ---- 运行时建表（绕开冻结的 db.py），失败不阻塞主链路 ----
 try:
@@ -74,6 +79,8 @@ try:
     experts.init()
     model_hub.init()
     taskflow.init()  # 岗位任务流：加载 task_library.json + 初始化审计/编排
+    labor_relations.init()
+    salary_records.init()
 except Exception:
     pass
 
@@ -450,7 +457,24 @@ def wecom_webhook(body: WeComIn):
 # ---------------- T6 闭环学习 ----------------
 @app.get("/api/skills/list")
 def skills_list(p: auth.Principal = Depends(need("chat"))):
-    return {"skills": skills.list_skills(p.tenant_id)}
+    items = skills.list_skills(p.tenant_id)
+    # 合并 skills/ 文件夹下的 Agent Skills（skills_catalog 实时扫描 SKILL.md）
+    # 这类 skill 以 name 作为 id，UI 选中后 chat 端会按 name 加载其正文注入 system prompt
+    try:
+        from core import skills_catalog
+        for s in skills_catalog.list_skills():
+            items.append({
+                "id": s["name"],
+                "type": "folder",
+                "name": s["name"],
+                "title": s["name"],
+                "description": s.get("description", ""),
+                "trigger": s.get("trigger", ""),
+                "sub": (s.get("description", "") or "")[:60],
+            })
+    except Exception:
+        pass
+    return {"skills": items}
 
 
 @app.get("/api/experts/list")
@@ -1326,6 +1350,120 @@ def models_test(body: TestIn, p: auth.Principal = Depends(need("chat"))):
     return {"ok": r.get("ok"), "model_id": body.model_id, "model_name": r.get("model_name"),
             "latency_ms": r.get("latency_ms", 0), "err": r.get("err", ""),
             "text": (r.get("text") or "")[:40]}
+
+
+# ---------------- 劳动关系 / 薪酬 / 简历规则引擎 ----------------
+class ContractIn(BaseModel):
+    id: int | None = None
+    name: str = ""
+    personnel: str = ""
+    start_date: str = ""
+    end_date: str = ""
+    is_indefinite: int = 0
+    contract_no: int = 1
+    contract_type: str = "固定期限"
+    status: str = "履行中"
+    probation_start: str = ""
+    probation_end: str = ""
+    note: str = ""
+
+
+@app.get("/api/labor/dashboard")
+def labor_dashboard(p: auth.Principal = Depends(need("chat"))):
+    return labor_relations.dashboard(p.tenant_id)
+
+
+@app.get("/api/labor/contracts")
+def labor_contracts(status: str = "", p: auth.Principal = Depends(need("chat"))):
+    return {"contracts": labor_relations.list_contracts(p.tenant_id, status or None)}
+
+
+@app.post("/api/labor/contracts")
+def labor_contract_upsert(body: ContractIn, p: auth.Principal = Depends(need("kb.write"))):
+    cid = labor_relations.upsert_contract(tenant_id=p.tenant_id, **body.model_dump())
+    db.audit(p.tenant_id, p.username, "labor.contract.upsert", str(cid), body.name)
+    return {"ok": True, "id": cid}
+
+
+@app.delete("/api/labor/contracts/{cid}")
+def labor_contract_delete(cid: int, p: auth.Principal = Depends(need("kb.write"))):
+    labor_relations.delete_contract(cid)
+    db.audit(p.tenant_id, p.username, "labor.contract.delete", str(cid))
+    return {"ok": True}
+
+
+@app.get("/api/labor/todos")
+def labor_todos(status: str = "open", p: auth.Principal = Depends(need("chat"))):
+    return {"todos": labor_relations.list_todos(p.tenant_id, status)}
+
+
+@app.post("/api/labor/todos/{tid}/resolve")
+def labor_todo_resolve(tid: int, p: auth.Principal = Depends(need("kb.write"))):
+    labor_relations.resolve_todo(tid)
+    return {"ok": True}
+
+
+@app.post("/api/labor/sync")
+def labor_sync(p: auth.Principal = Depends(need("kb.write"))):
+    """手动触发合同预警重扫（每日也会由调度自动跑）。"""
+    r = labor_relations.sync_all(p.tenant_id)
+    db.audit(p.tenant_id, p.username, "labor.sync", "", f"生成 {r['generated']} 条待办")
+    return {"ok": True, **r}
+
+
+class SalaryIn(BaseModel):
+    id: int | None = None
+    emp_name: str = ""
+    month: str = ""
+    base_salary: int = 0
+    performance: int = 0
+    subsidy: int = 0
+    overtime_pay: int = 0
+    social_insurance: int = 0
+    housing_fund: int = 0
+    tax: int = 0
+    other_deduct: int = 0
+    note: str = ""
+
+
+@app.get("/api/salary/records")
+def salary_records_list(month: str = "", emp_name: str = "", p: auth.Principal = Depends(need("chat"))):
+    return {"records": salary_records.list_records(p.tenant_id, month or None, emp_name or None)}
+
+
+@app.get("/api/salary/summary")
+def salary_summary(month: str = "", p: auth.Principal = Depends(need("chat"))):
+    return {"summary": salary_records.month_summary(p.tenant_id, month or None)}
+
+
+@app.post("/api/salary/records")
+def salary_record_add(body: SalaryIn, p: auth.Principal = Depends(need("kb.write"))):
+    rid = salary_records.add_record(tenant_id=p.tenant_id, **body.model_dump())
+    db.audit(p.tenant_id, p.username, "salary.record.add", str(rid), body.emp_name)
+    return {"ok": True, "id": rid}
+
+
+class SalaryQAIn(BaseModel):
+    question: str = ""
+
+
+@app.post("/api/salary/qa")
+def salary_qa(body: SalaryQAIn, p: auth.Principal = Depends(need("chat"))):
+    return salary_records.salary_qa(body.question, p.tenant_id)
+
+
+class ResumeScreenIn(BaseModel):
+    text: str = ""
+    role: str = ""
+    hard_cond: dict = {}
+    weights: dict = {}
+
+
+@app.post("/api/resume/screen")
+def resume_screen(body: ResumeScreenIn, p: auth.Principal = Depends(need("chat"))):
+    """规则引擎初筛（DeepSeek 离线降级 / 双轨交叉校验用）。"""
+    return resume_screening.screen_resume(body.text, body.role, body.hard_cond or None,
+                                          body.weights or None)
 
 
 # ---------------- 前端 ----------------

@@ -317,7 +317,25 @@ def run_skill_task(task_id: str, *, resume_path: str = None, role_name: str = No
         llm = g.get("exec", {})
         cand = llm.get("candidate")
         std_path = llm.get("std_path")
+        resume_text = g.get("materials", {}).get("resume_text", "")
+
+        # 规则引擎双轨：确定性评分（离线可用，作交叉校验 / DeepSeek 不可用时的降级）
+        rule = None
+        try:
+            from core import resume_screening as rs
+            rule = rs.screen_resume(resume_text, role or "", None)
+        except Exception:
+            rule = None
+
         if not cand or not std_path or not os.path.isfile(std_path):
+            # LLM 失败 → 规则引擎离线降级（确定性、可审计）
+            if rule:
+                return {"status": "rule_fallback",
+                        "rule_bucket": rule.get("bucket"), "rule_score": rule.get("score"),
+                        "rule_hard_pass": rule.get("hard_pass"),
+                        "rule_fields": rule.get("fields"),
+                        "note": "DeepSeek 未产出有效结果，已用规则引擎离线降级评分（确定性、可审计；"
+                                "未写入 candidates.csv，需人工复核）"}
             return {"status": "no_candidate", "note": "LLM 未产出有效候选人 JSON 或找不到评分标准",
                     "raw_llm": (llm.get("raw", "") or "")[:500]}
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -330,12 +348,19 @@ def run_skill_task(task_id: str, *, resume_path: str = None, role_name: str = No
                                      cwd=skill_dir, timeout=120)
             rep_out = subprocess.run([sys.executable, py, "report", "--min", "8"],
                                      capture_output=True, text=True, cwd=skill_dir, timeout=120)
+            cross = ""
+            if rule:
+                cross = (f"\n\n—— 规则引擎交叉校验（离线降级通道）——\n"
+                         f"三档：{rule.get('bucket')} | 规则总分：{rule.get('score')} | "
+                         f"硬条件通过：{rule.get('hard_pass')}\n"
+                         f"解析字段：{json.dumps(rule.get('fields', {}), ensure_ascii=False)}")
             return {"status": "done",
                     "add_stdout": (add_out.stdout or add_out.stderr).strip(),
-                    "report_stdout": (rep_out.stdout or rep_out.stderr).strip(),
+                    "report_stdout": (rep_out.stdout or rep_out.stderr).strip() + cross,
                     "csv_path": os.path.join(data_dir, "candidates.csv"),
                     "candidate_json": cand_path,
-                    "note": "确定性评分已写入 candidates.csv（纯标准库引擎，可离线审计）"}
+                    "rule": {"bucket": rule.get("bucket"), "score": rule.get("score")} if rule else None,
+                    "note": "确定性评分已写入 candidates.csv（纯标准库引擎，可离线审计）；规则引擎已作交叉校验"}
         except Exception as e:
             return {"status": "error", "err": str(e)}
 
@@ -346,8 +371,21 @@ def run_skill_task(task_id: str, *, resume_path: str = None, role_name: str = No
 
     def h_end(node, g):
         tool = g.get("format", {})
+        cand = g.get("exec", {}).get("candidate") or {}
+        # 脱敏：手机号/邮箱在返回结果中掩码，避免明文泄露
+        try:
+            from core import security as sec
+            if cand.get("手机号"):
+                cand = dict(cand)
+                cand["手机号"] = sec.mask_phone(str(cand["手机号"]))
+            if cand.get("邮箱"):
+                cand = dict(cand)
+                cand["邮箱"] = sec.mask_email(str(cand["邮箱"]))
+        except Exception:
+            pass
         return {"report": tool.get("report_stdout", ""), "csv_path": tool.get("csv_path"),
-                "add_log": tool.get("add_stdout", ""), "candidate_json": tool.get("candidate_json")}
+                "add_log": tool.get("add_stdout", ""), "candidate_json": tool.get("candidate_json"),
+                "rule": tool.get("rule"), "candidate_masked": cand}
 
     handlers = {
         "start": h_start, "knowledge": h_knowledge, "llm": h_llm,
@@ -374,6 +412,8 @@ def run_skill_task(task_id: str, *, resume_path: str = None, role_name: str = No
         "report": tool_out.get("report_stdout"),
         "csv_path": tool_out.get("csv_path"),
         "add_log": tool_out.get("add_stdout"),
+        "rule": tool_out.get("rule"),
+        "candidate_masked": tool_out.get("candidate_masked"),
         "audit": "已写入 SOC 审计链" if res.get("ok") else "未写入",
         "trace": {k: {kk: vv for kk, vv in v.items() if kk in ("status", "chars", "ok", "model", "provider", "std_role", "approved", "dry", "note")} for k, v in out.items()},
     }

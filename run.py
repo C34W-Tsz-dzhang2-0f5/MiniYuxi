@@ -89,6 +89,94 @@ def _ensure_secret() -> None:
         sys.exit(1)
 
 
+# ---------------------------------------------------------------------------
+# 调度驱动 + LAN 安全 + 启动钩子（让劳动关系每日预警/备份真正自动跑）
+# ---------------------------------------------------------------------------
+def _enforce_lan_guard(args) -> None:
+    """非回环 host（0.0.0.0 / 局域网 IP）视为暴露到网络，强制安全自检：
+    - admin 若仍为默认口令 admin123，自动重置为随机强口令并打印（强制改密）；
+    - 默认密钥已由 _ensure_secret 处理，此处只管口令。
+    """
+    loopback = args.host in ("127.0.0.1", "localhost", "::1")
+    if loopback:
+        return
+    print("=" * 62)
+    print("  🔴 检测到非回环监听（LAN/公网暴露）：已启用强制安全检查")
+    try:
+        from core import auth
+        conn = db.connect()
+        row = conn.execute(
+            "SELECT password_hash, salt FROM users WHERE tenant_id='default' AND username='admin'"
+        ).fetchone()
+        if row and auth.verify_password("admin123", row["password_hash"], row["salt"]):
+            new_pw = secrets.token_urlsafe(12)
+            h, s = auth.hash_password(new_pw)
+            conn.execute(
+                "UPDATE users SET password_hash=?, salt=? WHERE tenant_id='default' AND username='admin'",
+                (h, s))
+            conn.commit()
+            print(f"  ⚠ admin 仍使用默认口令 admin123，已自动重置为随机强口令：{new_pw}")
+            print("    请妥善保存；上线前建议改用专属账号并再次改密。")
+        else:
+            print("  ✓ admin 口令已非默认值")
+    except Exception as exc:
+        print(f"  ✗ LAN 自检异常：{exc}（服务仍启动，请人工确认口令安全）")
+    print("=" * 62)
+
+
+def _register_default_jobs() -> None:
+    """注册每日定时任务（幂等：已存在则跳过）。"""
+    from core import db, scheduler
+    specs = {
+        "labor_sync_daily": ({"kind": "daily", "at": "08:00"}, {"action": "labor_sync"}),
+        "backup_daily": ({"kind": "daily", "at": "03:00"}, {"action": "daily_backup"}),
+    }
+    # 注意：db.connect() 返回线程本地共享连接，此处绝不可 close，
+    # 否则该线程后续所有 DB 操作都会 "Cannot operate on a closed database"。
+    conn = db.connect()
+    for name, (spec, payload) in specs.items():
+        try:
+            exists = conn.execute(
+                "SELECT id FROM schedules WHERE name=?", (name,)).fetchone()
+            if not exists:
+                scheduler.register(name, spec, payload,
+                                   tenant_id="default", conn=conn)
+        except Exception:
+            pass
+
+
+def _run_job(payload: dict) -> None:
+    action = (payload or {}).get("action")
+    if action == "labor_sync":
+        from core import labor_relations
+        labor_relations.sync_all()
+    elif action == "daily_backup":
+        from core import backup
+        backup.daily_backup()
+
+
+def _schedule_pump() -> None:
+    """后台线程：每 60s 拉取到期任务并分发执行（补全 scheduler 的执行侧）。"""
+    import time as _t
+    from datetime import datetime as _dt
+    from core import scheduler
+    while True:
+        try:
+            jobs = scheduler.due_jobs(now=_dt.now())
+            for j in jobs:
+                try:
+                    _run_job(j.get("payload"))
+                except Exception:
+                    pass
+                try:
+                    scheduler.mark_run(j["id"])
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        _t.sleep(60)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default=os.getenv("MINIYUXI_HOST", "127.0.0.1"))
@@ -102,6 +190,18 @@ def main() -> None:
     from core import config, db
 
     db.init_db()
+    _enforce_lan_guard(args)  # 非回环 host 强制 admin 改密（失败安全）
+    _register_default_jobs()  # 幂等注册每日预警/备份任务
+    # 启动即跑一次：备份 + 合同预警
+    try:
+        from core import backup, labor_relations
+        labor_relations.init()
+        backup.daily_backup()
+        labor_relations.sync_all()
+    except Exception as exc:
+        print(f"  （启动钩子异常，已忽略：{exc}）")
+    # 后台驱动定时任务（让每日预警/备份真正自动执行）
+    threading.Thread(target=_schedule_pump, daemon=True).start()
     print("=" * 62)
     print("  MiniYuxi · 轻量 HR 智能体平台（原生进程 · 零外部服务）")
     print("=" * 62)
