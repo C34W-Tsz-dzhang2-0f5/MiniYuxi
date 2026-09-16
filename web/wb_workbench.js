@@ -294,13 +294,30 @@
     toast('已新建对话');
   }
 
+  /* U1/U3：401 只做「非阻塞」登录态提示——不自动弹遮罩，
+     否则首页初始化的一串请求会在首屏盖一层登录弹窗，把欢迎页整个挡掉。
+     真正需要凭据的动作（发送消息 / 点登录按钮）才唤起弹窗。 */
+  var _authToastAt = 0;
+  function markUnauthorized() {
+    state.unauthorized = true;
+    var fu = $('#footerUser');
+    if (fu) fu.textContent = '未登录';
+    var btn = $('#btnLogin');
+    if (btn) { btn.hidden = false; var c = btn.querySelector('.wb-button__content'); if (c) c.textContent = '登录'; }
+    var now = Date.now();
+    if (now - _authToastAt > 8000) {   // 8s 内只提示一次，避免刷屏
+      _authToastAt = now;
+      toast('未登录：部分数据需登录后加载，点右上角「登录」');
+    }
+  }
+
   function wbFetch(url, opts) {
     opts = opts || {};
     opts.headers = opts.headers || {};
     opts.headers['Authorization'] = 'Bearer ' + TOKEN;
     return fetch(url, opts).then(function (r) {
-      if (r.status === 401) {   // U1：未登录 → 引导登录，不再静默降级
-        if (!document.getElementById('loginModal')) showLoginModal();
+      if (r.status === 401) {
+        markUnauthorized();
         throw new Error('未登录');
       }
       return r;

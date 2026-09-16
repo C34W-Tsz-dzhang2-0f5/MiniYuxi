@@ -659,6 +659,9 @@ body.dark .wb-scene-tabs__pill--active { color: var(--wb-canvas); }
 /* ===================== 响应式（对齐原站断点：1279 / 1024 / 768 / 640 / 480） ===================== */
 @media (max-width: 1279px) {
   :root { --wb-detail-w: 280px; --wb-content-max: 760px; }
+  /* nav 改为 overflow:visible 后，必须在更早的断点就收敛条目，否则会外溢顶到登录按钮 */
+  .cloud-welcome__nav-item:nth-child(n+5) { display: none; }
+  .nav-more { display: inline-flex; }
 }
 /* L1：≤1024px 右栏不再直接砍掉，改为可唤出的抽屉 */
 @media (max-width: 1024px) {
@@ -712,7 +715,6 @@ body.dark .wb-scene-tabs__pill--active { color: var(--wb-canvas); }
   .composer-tools .composer-tool span:not(.tool-kbd) { display: none; }
   /* L6：移动端工具可达性——点按热区放大、抽屉改底部全宽面板 */
   .composer-tool { min-width: 34px; min-height: 34px; }
-  .conversation-list-collapsed-top .brand-wordmark { display: none; }
   .tool-menu__panel { left: 12px !important; right: 12px; top: auto !important; bottom: 12px; width: auto; }
   .tool-menu--drawer .tool-menu__panel { width: auto; }
   .tool-menu__body { max-height: 52vh; }
@@ -794,8 +796,11 @@ body.dark .detail-tab--active { color: #0d0d0d; }
 
 /* V2：侧栏品牌锁定（图标 + 字标） */
 .brand-lockup { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-.brand-lockup .brand-logo-mark { color: var(--wb-text); }
+.brand-lockup .brand-logo-mark { color: var(--wb-text); flex: 0 0 auto; }
 body.dark .brand-lockup .brand-logo-mark { color: var(--wb-text); }
+/* 折叠态侧栏是窄轨，字标放不下会被裁成「Mi」——只保留图标标志并居中 */
+.conversation-list-collapsed-top .brand-lockup { justify-content: center; flex: 1 1 auto; }
+.conversation-list-collapsed-top .brand-wordmark { display: none; }
 
 /* L2：导航「更多」溢出菜单 */
 .nav-more {
