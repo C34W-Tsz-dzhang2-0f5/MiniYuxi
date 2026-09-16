@@ -1191,12 +1191,12 @@ def wb_page():
 
 @app.get("/wb/wb_workbench.css")
 def wb_css():
-    return FileResponse(WEB_DIR / "wb_workbench.css", media_type="text/css")
+    return FileResponse(WEB_DIR / "wb_workbench.css", media_type="text/css", headers=_NO_CACHE)
 
 
 @app.get("/wb/wb_workbench.js")
 def wb_js():
-    return FileResponse(WEB_DIR / "wb_workbench.js", media_type="application/javascript")
+    return FileResponse(WEB_DIR / "wb_workbench.js", media_type="application/javascript", headers=_NO_CACHE)
 
 
 @app.get("/api/wb/bootstrap")
@@ -1472,12 +1472,17 @@ def resume_screen(body: ResumeScreenIn, p: auth.Principal = Depends(need("chat")
 
 
 # ---------------- 前端 ----------------
+# 本地/内网自用工具：前端资源一律 no-cache，避免「改了代码但浏览器仍跑旧 JS」这类
+# 排查成本极高的假故障（曾导致前端修复不生效、被误判为后端故障）。
+_NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
+
+
 @app.get("/")
 def index():
     """主界面 = MiniYuxi 智能工作台（外观同 /wb 复刻，字样已改 MiniYuxi）。
     注入快捷入口图标 JSON（__ICONS_JSON__ 占位符）。"""
     html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(html.replace("__ICONS_JSON__", _wb_icons_json()))
+    return HTMLResponse(html.replace("__ICONS_JSON__", _wb_icons_json()), headers=_NO_CACHE)
 
 
 # V1：旧版多模块入口统一收敛到 MiniYuxi 主界面

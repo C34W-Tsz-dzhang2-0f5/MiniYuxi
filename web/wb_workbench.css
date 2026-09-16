@@ -831,6 +831,11 @@ body.dark .brand-lockup .brand-logo-mark { color: var(--wb-text); }
 .wb-home-composer__input-slot { margin-top: 4px; }
 .wb-input-footer { margin-top: 12px; }
 
+/* 多模型不可用：明确告知原因并引导（原先静默显示「（无返回）」） */
+.mx-err { color: #d93026; font-weight: 600; }
+.mx-err__hint { color: var(--wb-text-secondary); font-size: 12.5px; }
+body.dark .mx-err { color: #ff7b72; }
+
 @media (prefers-reduced-motion: reduce) {
   .detail-panel-container { transition: none !important; }
   .detail-panel-drawer-backdrop { transition: none !important; }

@@ -10,10 +10,13 @@
   var $ = function (s) { return document.querySelector(s); };
   var $$ = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
 
-  /* ---------------- 鉴权（静默自动登录，保证「功能正常使用」）---------------- */
+  /* ---------------- 鉴权（U1：不再静默登录，未登录由交互引导） ---------------- */
   var TOKEN = (function () {
     try { return localStorage.getItem('miniyuxi_token') || ''; } catch (e) { return ''; }
   })();
+
+  /* U3：被「未登录」拦下的待发消息，登录成功后自动续发，避免用户重打一遍 */
+  var pendingSend = null;
 
   function setToken(t) {
     TOKEN = t || '';
@@ -67,14 +70,47 @@
   var ICON_MAP = {};
   (ICONS.quickActions || []).forEach(function (q) { ICON_MAP[q.label] = q.svg; });
 
-  var CONVERSATIONS = [
-    { id: 'c1', title: '招聘渠道 W37 复盘', time: '今天' },
-    { id: 'c2', title: 'MiniYuxi 前端架构梳理', time: '今天' },
-    { id: 'c3', title: '劳动争议案件要点摘录', time: '昨天' },
-    { id: 'c4', title: 'HR AI 助理模块清单', time: '昨天' },
-    { id: 'c5', title: '培训计划草案（10 月）', time: '前天' },
-    { id: 'c6', title: '运营巡检报告要点', time: '前天' }
-  ];
+  /* ---------------- U2：会话与消息 localStorage 持久化 ----------------
+     会话列表键 miniyuxi_convos；单会话消息键 miniyuxi_msgs_<id>。
+     读写全部 try/catch 兜底（隐私模式 / 配额满时不致崩溃）。          */
+  var CONV_STORE_KEY = 'miniyuxi_convos';
+  var MSG_STORE_PREFIX = 'miniyuxi_msgs_';
+
+  function loadConvos() {
+    try {
+      var raw = localStorage.getItem(CONV_STORE_KEY);
+      if (!raw) return [];
+      var arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.filter(function (c) { return c && c.id; }) : [];
+    } catch (e) { return []; }
+  }
+  function saveConvos(list) {
+    try {
+      localStorage.setItem(CONV_STORE_KEY, JSON.stringify((list || []).slice(0, 50)));
+    } catch (e) {}
+  }
+  function msgsKey(id) { return MSG_STORE_PREFIX + id; }
+  function loadMsgs(id) {
+    if (!id) return [];
+    try {
+      var raw = localStorage.getItem(msgsKey(id));
+      if (!raw) return [];
+      var arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  }
+  function saveMsgs(id, msgs) {
+    if (!id) return;
+    try {
+      localStorage.setItem(msgsKey(id), JSON.stringify((msgs || []).slice(-80)));
+    } catch (e) {}
+  }
+  function dropMsgs(id) {
+    if (!id) return;
+    try { localStorage.removeItem(msgsKey(id)); } catch (e) {}
+  }
+
+  var CONVERSATIONS = loadConvos();
 
   var OVERVIEW = [
     { key: '会话数', val: CONVERSATIONS.length, pct: 60 },
@@ -284,12 +320,14 @@
 
   function startNewChat() {
     carryDraft('#composerInputDock', '#composerInput');   // L5：把对话态草稿带回欢迎态
+    state.activeConvo = null;   // U2：置空会话，下一条消息触发 newConvo 开新会话
     state.messages = [];
     state.sources = [];
     $('#messageList').innerHTML = '';
     $('#welcomeStage').hidden = false;
     $('#messageScroll').hidden = true;
     $('#chatDock').hidden = true;
+    $$('#convListBody .conv-item').forEach(function (x) { x.classList.remove('is-active'); });
     if (window.innerWidth <= 768) collapseSidebar();
     toast('已新建对话');
   }
@@ -763,6 +801,26 @@
     })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (d) {
+        // 后端以 ok:false + err 表达「模型不可用」，不能吞成「（无返回）」让用户干瞪眼
+        if (d && d.ok === false) {
+          var why = ({
+            'no_key': '该模型所属服务商尚未配置 API Key',
+            'timeout': '模型调用超时',
+            'http_error': '服务商返回错误',
+            'empty': '模型返回为空'
+          })[d.err] || ('调用失败（' + (d.err || '未知原因') + '）');
+          var cur = (d.model_name || d.model_id || '');
+          thinking.querySelector('.msg-bubble').innerHTML =
+            '<span class="mx-err">⚠ ' + why + '：' + cur + '</span><br>' +
+            '<span class="mx-err__hint">已自动切回「工作台」模式，可直接重发；' +
+            '或到「模型中心」为该服务商填入 Key 后再选它。</span>';
+          // 关键：把死掉的"指定模型/自动路由"模式复位，避免用户每条都撞墙
+          state.modelMode = 'workbench';
+          try { localStorage.setItem('mx_modelMode', 'workbench'); } catch (e) {}
+          state.busy = false; syncSend(); updateModelBar();
+          toast('该模型不可用，已切回工作台模式');
+          return;
+        }
         var ans = (d && d.text) ? d.text : ((d && d.reply) || '（无返回）');
         var routed = d.routed || {};
         thinking.querySelector('.msg-bubble').textContent = '';
@@ -932,7 +990,7 @@
     $('#convListBody').innerHTML = items.length ? items.map(function (c, i) {
       return '<div class="conv-item' + (i === 0 ? ' is-active' : '') + '" data-id="' + c.id + '">' +
              '<span class="conv-dot"></span><span class="conv-title">' + c.title + '</span></div>';
-    }).join('') : '<div class="empty-state">无匹配对话</div>';
+    }).join('') : '<div class="empty-state">' + (kw ? '无匹配对话' : '暂无对话，发送消息后自动创建') + '</div>';
 
     $$('#convListBody .conv-item').forEach(function (el) {
       el.addEventListener('click', function () { selectConvo(el.dataset.id, el); });
@@ -1000,6 +1058,7 @@
       }).join('');
     }
     paint(rows);
+    if (!TOKEN) return;   // U1：未登录不打必然 401 的请求，避免首屏控制台噪音
     fetch('/api/wb/stats', { headers: { 'Authorization': 'Bearer ' + TOKEN } })
       .then(function (r) { if (!r.ok) throw 0; return r.json(); })
       .then(function (d) {
@@ -1132,7 +1191,9 @@
 
   function send(text, inputEl) {
     if (!text || state.busy) return;
-    if (!TOKEN) { showLoginModal(); toast('请先登录后再对话'); return; }   // U1：无 token 引导登录
+    if (!TOKEN) { showLoginModal(); toast('请先登录后再对话'); pendingSend = { text: text }; return; }   // U1：无 token 引导登录
+    // U2：首条消息自动建会话（否则消息无法归属、无从持久化）
+    if (!state.activeConvo) newConvo(text);
 
     // ===== 多模型：对比模式 =====
     if (state.modelMode === 'compare') {
@@ -1277,6 +1338,19 @@
         var name = (d && d.username) ? d.username : u;
         var fu = $('#footerUser'); if (fu) fu.textContent = name + '（' + (d.role || '') + '）';
         toast('登录成功：' + name);
+        state.unauthorized = false;
+        renderOverview();      // 登录后补齐需鉴权的概览数据
+        renderConversations();
+        // U3：把登录前被拦下的那条消息自动续发出去
+        if (pendingSend && pendingSend.text) {
+          var queued = pendingSend.text;
+          pendingSend = null;
+          setTimeout(function () {
+            var el = $('#composerInputDock');
+            if (!el || el.offsetParent === null) el = $('#composerInput');
+            send(queued, el);
+          }, 120);
+        }
       }).catch(function (e) {
         $('#lmErr').textContent = '登录失败：' + (e && e.message ? e.message : e);
       });
@@ -1362,6 +1436,7 @@
       var mod = localStorage.getItem('wb_model') || '';
       $('#toolMenuModel').textContent = (prov ? (prov + ' · ') : '均衡 · ') + (mod || '—');
     } catch (e) {}
+    if (!TOKEN) return;   // U1：未登录不打必然 401 的请求
     wbFetch('/api/usage/stats').then(function (r) { return r.json(); }).then(function (u) {
       var tot = u.total || u || {};
       var cost = typeof tot.cost === 'number' ? tot.cost : 0;
