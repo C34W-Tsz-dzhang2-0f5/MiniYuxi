@@ -13,6 +13,10 @@
 """
 import json
 import os
+import re
+import subprocess
+import sys
+from datetime import datetime
 
 from . import db, gateway, orchestration, soc_audit, model_hub
 
@@ -116,6 +120,11 @@ def run_task(task_id: str, variables: dict = None, materials: list = None,
     task = get_task(task_id)
     if not task:
         return {"ok": False, "err": "task_not_found", "task_id": task_id}
+    if task.get("kind") == "skill":
+        resume_path = materials[0] if (materials and materials[0]) else None
+        role_name = (variables or {}).get("role_name")
+        return run_skill_task(task_id, resume_path=resume_path, role_name=role_name,
+                             tenant_id=tenant_id, dry=dry, auto_approve=auto_approve, model=model)
     materials = materials or []
     variables = variables or {}
     dag = build_dag(task)
@@ -185,4 +194,186 @@ def run_task(task_id: str, variables: dict = None, materials: list = None,
         "followups": task.get("followups", []),
         "audit": "已写入 SOC 审计链" if res.get("ok") else "未写入",
         "trace": {k: {kk: vv for kk, vv in v.items() if kk in ("status", "provided", "missing_count", "ok", "model", "model_name", "provider", "latency_ms", "tokens", "cost", "approved", "dry")} for k, v in out.items()},
+    }
+
+
+def run_skill_task(task_id: str, *, resume_path: str = None, role_name: str = None,
+                   tenant_id: str = "default", dry: bool = False, auto_approve: bool = True,
+                   model: str = None) -> dict:
+    """执行 kind=skill 的任务（如 hr_resume 简历筛选）。
+
+    链路（复用 build_dag 的 6 节点结构）：
+      knowledge 定位/读取简历 → llm(DeepSeek) 提取结构化候选人 + 按标准逐项打分 →
+      tool 调 skills/<skill>/scripts/pipeline.py 做确定性加权评分并写入 candidates.csv →
+      approval(HITL) → end 返回报告与 CSV 路径。
+    确定性评分引擎为纯标准库 Python，可离线运行、可审计；LLM 只做「标准化提取」。
+    """
+    task = get_task(task_id)
+    if not task or task.get("kind") != "skill":
+        return {"ok": False, "err": "not_skill_task", "task_id": task_id}
+
+    skill = task.get("skill", "")
+    skill_dir = os.path.join(ROOT, "skills", skill)
+    scripts_dir = os.path.join(skill_dir, "scripts")
+    std_dir = os.path.join(skill_dir, "scoring_standards")
+    inbox_dir = os.path.join(skill_dir, "inbox")
+    data_dir = os.path.join(skill_dir, "data")
+    os.makedirs(data_dir, exist_ok=True)
+
+    dag = build_dag(task)  # 复用相同 6 节点结构（type 映射一致）
+    role = role_name or task.get("skill_role")
+
+    def _match_standard(rn):
+        if not rn or not os.path.isdir(std_dir):
+            return None, None
+        for p in sorted(os.listdir(std_dir)):
+            if p.startswith("_") or not p.endswith(".json"):
+                continue
+            try:
+                d = json.loads(open(os.path.join(std_dir, p), encoding="utf-8").read())
+            except Exception:
+                continue
+            if d.get("role") == rn:
+                return os.path.join(std_dir, p), d
+        return None, None
+
+    def _extract_json(s):
+        if not s:
+            return None
+        try:
+            return json.loads(s)
+        except Exception:
+            m = re.search(r"\{.*\}", s, re.S)
+            if m:
+                try:
+                    return json.loads(m.group(0))
+                except Exception:
+                    return None
+        return None
+
+    def h_start(node, g):
+        return {"status": "started", "task_id": task_id, "skill": skill}
+
+    def h_knowledge(node, g):
+        path = None
+        if resume_path and os.path.isfile(resume_path):
+            path = resume_path
+        elif os.path.isdir(inbox_dir):
+            files = sorted(f for f in (os.path.join(inbox_dir, f) for f in os.listdir(inbox_dir))
+                           if os.path.isfile(f) and not os.path.basename(f).startswith("_"))
+            if files:
+                path = files[0]
+        text = ""
+        if path:
+            try:
+                text = open(path, encoding="utf-8", errors="ignore").read()
+            except Exception:
+                text = ""
+        return {"resume_path": path, "resume_text": text[:6000], "chars": len(text),
+                "note": "已读取简历；缺失项不得编造"}
+
+    def h_llm(node, g):
+        resume_text = g.get("materials", {}).get("resume_text", "")
+        std_path, std = _match_standard(role)
+        if not std:  # 兜底：取第一个非模板标准
+            for p in sorted(os.listdir(std_dir)):
+                if p.startswith("_") or not p.endswith(".json"):
+                    continue
+                try:
+                    d = json.loads(open(os.path.join(std_dir, p), encoding="utf-8").read())
+                except Exception:
+                    continue
+                std_path, std = os.path.join(std_dir, p), d
+                break
+        dims = std.get("scoring", {}).get("dimensions", []) if std else []
+        dim_desc = "\n".join(
+            f"- {d['key']}（{d['name']}，权重 {d.get('weight')}，满分 {d.get('max', 10)}）: {d.get('description', '')}"
+            for d in dims
+        )
+        prompt = (
+            (task.get("prompt_template", "") or "") + "\n\n# 简历内容\n" + resume_text + "\n\n"
+            "# 评分标准（岗位：" + (std.get("role", "未知") if std else "未知") + "）\n" + dim_desc + "\n\n"
+            "请严格按上述维度为候选人逐项打分（1-10 整数），并只输出如下 JSON（不要任何额外文字）：\n"
+            '{"姓名":"","性别":"","年龄":0,"手机号":"","邮箱":"","求职意向岗位":"",'
+            '"毕业院校":"","学历层次":"","专业名称":"","是否985/211":"","工作年限":0,"是否大厂背景":"",'
+            '"工作经历摘要":"","技能清单":"",'
+            '"dim_scores":{"education_match":0,"experience_relevance":0,"skill_fit":0,"project_depth":0,"stability":0,"potential":0},'
+            '"总结评价":"","建议问题":""}'
+        )
+        if dry:
+            return {"dry": True, "prompt_preview": prompt[:800], "std_role": std.get("role") if std else None}
+        if model:
+            r = model_hub.chat(model, "你是资深简历解析与评分助手，只输出结构化 JSON，不要解释。", prompt, tenant_id=tenant_id)
+        else:
+            r = gateway.chat("你是资深简历解析与评分助手，只输出结构化 JSON，不要解释。", prompt, tenant_id=tenant_id)
+        return {"ok": r.get("ok"), "raw": r.get("text", ""), "candidate": _extract_json(r.get("text", "")),
+                "model": r.get("model") or r.get("model_id"), "provider": r.get("provider"),
+                "std_path": std_path, "std_role": std.get("role") if std else None,
+                "latency_ms": r.get("latency_ms"), "tokens": r.get("tokens"), "cost": r.get("cost")}
+
+    def h_tool(node, g):
+        if dry:
+            return {"status": "dry", "note": "dry 模式不写库"}
+        llm = g.get("exec", {})
+        cand = llm.get("candidate")
+        std_path = llm.get("std_path")
+        if not cand or not std_path or not os.path.isfile(std_path):
+            return {"status": "no_candidate", "note": "LLM 未产出有效候选人 JSON 或找不到评分标准",
+                    "raw_llm": (llm.get("raw", "") or "")[:500]}
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        cand_path = os.path.join(data_dir, f"_cand_{ts}.json")
+        open(cand_path, "w", encoding="utf-8").write(json.dumps(cand, ensure_ascii=False, indent=2))
+        py = os.path.join(scripts_dir, "pipeline.py")
+        try:
+            add_out = subprocess.run([sys.executable, py, "add", "--standard", std_path,
+                                      "--candidate", cand_path], capture_output=True, text=True,
+                                     cwd=skill_dir, timeout=120)
+            rep_out = subprocess.run([sys.executable, py, "report", "--min", "8"],
+                                     capture_output=True, text=True, cwd=skill_dir, timeout=120)
+            return {"status": "done",
+                    "add_stdout": (add_out.stdout or add_out.stderr).strip(),
+                    "report_stdout": (rep_out.stdout or rep_out.stderr).strip(),
+                    "csv_path": os.path.join(data_dir, "candidates.csv"),
+                    "candidate_json": cand_path,
+                    "note": "确定性评分已写入 candidates.csv（纯标准库引擎，可离线审计）"}
+        except Exception as e:
+            return {"status": "error", "err": str(e)}
+
+    def h_approval(node, g):
+        if auto_approve:
+            return {"approved": True, "mode": "auto"}
+        return {"approved": False, "mode": "await_human", "note": "等待人工确认后放行"}
+
+    def h_end(node, g):
+        tool = g.get("format", {})
+        return {"report": tool.get("report_stdout", ""), "csv_path": tool.get("csv_path"),
+                "add_log": tool.get("add_stdout", ""), "candidate_json": tool.get("candidate_json")}
+
+    handlers = {
+        "start": h_start, "knowledge": h_knowledge, "llm": h_llm,
+        "tool": h_tool, "approval": h_approval, "end": h_end,
+    }
+    c = db.connect()
+    init(c)
+    res = orchestration.run_automation(dag, trigger="manual", ctx={"task_id": task_id, "kind": "skill"},
+                                        handlers=handlers, conn=c)
+    out = res.get("outputs", {})
+    tool_out = out.get("format", {})
+    return {
+        "ok": res.get("ok"),
+        "task_id": task_id,
+        "kind": "skill",
+        "skill": skill,
+        "role": task.get("role"),
+        "title": task.get("title"),
+        "resume_path": out.get("materials", {}).get("resume_path"),
+        "std_role": out.get("exec", {}).get("std_role"),
+        "model": out.get("exec", {}).get("model"),
+        "provider": out.get("exec", {}).get("provider"),
+        "candidate": out.get("exec", {}).get("candidate"),
+        "report": tool_out.get("report_stdout"),
+        "csv_path": tool_out.get("csv_path"),
+        "add_log": tool_out.get("add_stdout"),
+        "audit": "已写入 SOC 审计链" if res.get("ok") else "未写入",
+        "trace": {k: {kk: vv for kk, vv in v.items() if kk in ("status", "chars", "ok", "model", "provider", "std_role", "approved", "dry", "note")} for k, v in out.items()},
     }

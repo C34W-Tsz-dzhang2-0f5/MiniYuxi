@@ -1,0 +1,22 @@
+{
+  "role": "产品经理",
+  "role_id": "product_manager",
+  "description": "负责 B 端 SaaS 产品的需求分析、PRD 撰写、迭代规划与跨团队推动。要求 3 年以上产品经理经验，有 0-1 或复杂业务系统经验优先，熟悉数据驱动决策。",
+  "blind_screening": true,
+  "knockout": [
+    "工作年限 < 2 年（经验相关性维度直接判 0）",
+    "无任何产品/需求相关职责描述"
+  ],
+  "scoring": {
+    "scale_max": 10,
+    "dimensions": [
+      { "key": "education_match", "name": "学历匹配度", "weight": 0.10, "max": 10, "description": "院校层次 + 专业对口性（计算机/软件/商科相关优先）" },
+      { "key": "experience_relevance", "name": "经验相关性", "weight": 0.30, "max": 10, "description": "产品经验年限、行业/岗位对口（B端/SaaS/复杂业务系统加分）" },
+      { "key": "skill_fit", "name": "技能契合度", "weight": 0.10, "max": 10, "description": "需求分析、PRD、数据分析、项目管理、原型工具等" },
+      { "key": "project_depth", "name": "项目深度", "weight": 0.30, "max": 10, "description": "主导项目的规模、复杂度、是否有量化业务成果（如留存/转化提升）" },
+      { "key": "stability", "name": "稳定性指标", "weight": 0.10, "max": 10, "description": "近 5 年跳槽频率、职业路径是否连贯" },
+      { "key": "potential", "name": "综合潜力", "weight": 0.10, "max": 10, "description": "逻辑思维、学习能力、沟通推动、管理潜力" }
+    ]
+  },
+  "fairness_notes": "评估前遮蔽姓名/性别/年龄/照片/邮编；评分须输出分项明细供人工复核；定期差异影响分析。"
+}

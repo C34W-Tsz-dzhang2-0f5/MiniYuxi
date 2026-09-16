@@ -120,3 +120,17 @@ $PY scripts/pipeline.py report --min 8             # 列出高分候选人
 - `scripts/pipeline.py` — 本地确定性评分/入库引擎
 - `inbox/` — 简历投放文件夹（含示例 sample_zhangsan.txt）
 - `README.md` — 使用说明
+
+## MiniYuxi 执行接入（已打通）
+本技能已作为 **kind=skill 任务**接入 MiniYuxi 执行引擎（`core/taskflow.py::run_skill_task`），
+不再是只读文本，而是可被真实调用的流水线：
+- 任务 id：`hr_resume_01`（在 `skills/task_library.json`，`role=hr`）
+- 链路：knowledge 读取简历 → llm(DeepSeek) 提取结构化候选人 JSON + 按标准逐项打分 →
+  tool 调 `scripts/pipeline.py` 做确定性加权评分并写入 `data/candidates.csv` → approval(HITL) → end
+- 调用方式（CLI）：
+  `python scripts/run_taskflow.py run hr_resume_01 --real --model deepseek:deepseek-chat --role 产品经理`
+  （`--resume <简历路径>` 可指定简历；不传则自动扫描 `inbox/`）
+- 调用方式（API）：`POST /api/taskflow/run` 传 `task_id=hr_resume_01`、`model=deepseek:deepseek-chat`、
+  `variables={"role_name":"产品经理"}`、`materials=[简历路径]`
+- 确定性评分引擎为纯标准库 Python，可离线运行、可审计；LLM 仅做「标准化提取」，最终评分与入库由 `pipeline.py` 完成。
+- 注：原 WorkBuddy 版的邮箱/飞书连接器模式在 MiniYuxi 暂未接入，当前为本地 inbox + CSV 模式。

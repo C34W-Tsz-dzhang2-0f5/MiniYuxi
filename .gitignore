@@ -1,5 +1,14 @@
 # ===== Secrets & local data（NEVER commit） =====
 data/
+# 各 skill 运行时产物（候选人表/去重/临时候选人 JSON），由 pipeline.py 按需重建
+skills/*/data/
+skills/*/inbox/_cand*.json
+# 本地验证产物
+hr_resume_run.json
+hr_resume_err.txt
+jd_run.json
+jd_run.png
+jd_report.html
 *.db
 *.sqlite
 *.sqlite3

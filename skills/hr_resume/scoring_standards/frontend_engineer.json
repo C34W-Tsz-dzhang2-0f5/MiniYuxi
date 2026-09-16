@@ -1,0 +1,22 @@
+{
+  "role": "前端工程师",
+  "role_id": "frontend_engineer",
+  "description": "负责 Web 前端开发与性能优化，要求 3 年以上经验，精通 React/Vue 及 TypeScript，有大型前端工程化或可视化项目经验优先。",
+  "blind_screening": true,
+  "knockout": [
+    "无任何前端框架（React/Vue 等）生产经验",
+    "工作年限 < 1 年"
+  ],
+  "scoring": {
+    "scale_max": 10,
+    "dimensions": [
+      { "key": "education_match", "name": "学历匹配度", "weight": 0.10, "max": 10, "description": "院校层次 + 专业对口性（计算机相关优先，但非硬性）" },
+      { "key": "experience_relevance", "name": "经验相关性", "weight": 0.30, "max": 10, "description": "前端经验年限、框架/工程化/业务对口" },
+      { "key": "skill_fit", "name": "技能契合度", "weight": 0.10, "max": 10, "description": "React/Vue/TS、构建工具、性能优化、可视化等" },
+      { "key": "project_depth", "name": "项目深度", "weight": 0.30, "max": 10, "description": "主导/核心参与的项目的复杂度、性能成果、技术深度" },
+      { "key": "stability", "name": "稳定性指标", "weight": 0.10, "max": 10, "description": "近 5 年跳槽频率、职业路径连贯性" },
+      { "key": "potential", "name": "综合潜力", "weight": 0.10, "max": 10, "description": "工程素养、学习能力、技术热情、协作潜力" }
+    ]
+  },
+  "fairness_notes": "评估前遮蔽姓名/性别/年龄/照片/邮编；评分须输出分项明细供人工复核；定期差异影响分析。"
+}

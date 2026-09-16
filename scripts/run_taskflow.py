@@ -38,6 +38,10 @@ def main():
             variables = json.loads(sys.argv[sys.argv.index("--vars") + 1])
         if "--materials" in sys.argv:
             materials = json.loads(sys.argv[sys.argv.index("--materials") + 1])
+        if "--resume" in sys.argv:
+            materials = [sys.argv[sys.argv.index("--resume") + 1]]
+        if "--role" in sys.argv:
+            variables = dict(variables, role_name=sys.argv[sys.argv.index("--role") + 1])
         r = taskflow.run_task(
             tid,
             variables=variables,

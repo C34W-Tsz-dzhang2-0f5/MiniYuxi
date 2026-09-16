@@ -1,0 +1,22 @@
+{
+  "role": "岗位名称（示例：产品经理）",
+  "role_id": "product_manager",
+  "description": "在此填写岗位描述（JD）：职责、要求、团队情况。WorkBuddy 读取后用于简历评分与面试问题生成。",
+  "blind_screening": true,
+  "knockout": [
+    "必填项1（一票否决，例如：无相关行业经验）",
+    "必填项2（例如：学历低于岗位最低要求）"
+  ],
+  "scoring": {
+    "scale_max": 10,
+    "dimensions": [
+      { "key": "education_match", "name": "学历匹配度", "weight": 0.10, "max": 10, "description": "院校层次 + 专业对口性" },
+      { "key": "experience_relevance", "name": "经验相关性", "weight": 0.30, "max": 10, "description": "工作年限、行业/岗位对口程度" },
+      { "key": "skill_fit", "name": "技能契合度", "weight": 0.10, "max": 10, "description": "掌握技能与岗位要求技能的匹配程度" },
+      { "key": "project_depth", "name": "项目深度", "weight": 0.30, "max": 10, "description": "项目规模、复杂度、量化成果" },
+      { "key": "stability", "name": "稳定性指标", "weight": 0.10, "max": 10, "description": "跳槽频率、职业路径连贯性" },
+      { "key": "potential", "name": "综合潜力", "weight": 0.10, "max": 10, "description": "成长性、学习能力、管理潜力" }
+    ]
+  },
+  "fairness_notes": "评分必须输出分项明细；评估前遮蔽姓名/性别/年龄/照片/邮编；定期做差异影响分析（four-fifths 规则）；AI 只做标准化，最终决策须人工复核。"
+}
