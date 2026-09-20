@@ -28,8 +28,10 @@ python run.py --port 8801
 自检（推荐先跑一次，验证全部能力）：
 
 ```powershell
-python selftest.py     # 期望输出：20/20 全部通过
+python tests/selftest.py     # 期望输出：20/20 全部通过
 ```
+> **质量护栏（360 七坑 · 坑3 一键生成防护）**：提交前可跑 `bash scripts/verify-precommit.sh`（前端未定义符号扫描 + 法条「无引用不出文」闸门）；推送到 `main` 或开 PR 时，GitHub Actions（`.github/workflows/verify.yml`）会自动跑上述卡点 + 前端路由冒烟，未过即阻断合并。
+
 
 ---
 
@@ -54,7 +56,7 @@ core/auth.py        口令哈希、JWT 签发校验、RBAC
 core/rag.py         分词 / 分块 / 解析 / Embedding / 检索 / 问答
 core/agent.py       流程定义（招聘 19 阶段）与运行状态机
 web/index.html      单页控制台
-run.py              启动器    selftest.py  端到端自检
+run.py              启动器    tests/selftest.py  端到端自检
 ```
 
 ---
@@ -127,7 +129,7 @@ cp .env.example .env        # 编辑 .env 填入 LLM_API_KEY / EMB_API_KEY / DOU
 # 或直接 export 环境变量；Windows 也可复制 start_miniyuxi.example.bat 为 start_miniyuxi.bat 后填 Key
 
 python run.py               # 默认 http://127.0.0.1:8801
-python selftest.py          # 期望 20/20
+python tests/selftest.py          # 期望 20/20
 ```
 
 默认账号：`default / admin / admin123`（**首次部署务必改密**）。

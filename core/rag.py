@@ -13,7 +13,7 @@ from pathlib import Path
 
 import requests
 
-from . import config, db
+from . import config, db, citation_gate
 
 _CJK = r"\u4e00-\u9fff"
 
@@ -369,6 +369,11 @@ def answer(tenant_id: str, question: str, top_k: int = 5, history: list | None =
     hits = search(tenant_id, question, top_k)
     citations = [{"title": h["title"], "text": h["text"][:200], "score": h["score"]} for h in hits]
 
+    # 坑2 防护（360 七坑）：legal/labor 意图且未命中知识库 → 硬闸门拒绝自由生成法条
+    block = citation_gate.evaluate(question, hits)
+    if block is not None:
+        return block
+
     # ① 显式前缀快路径
     tool_hit = _detect_tool(question)
     if tool_hit:
@@ -413,6 +418,10 @@ def answer(tenant_id: str, question: str, top_k: int = 5, history: list | None =
                "loop_trace": res["loop_trace"], "memories_used": res["memories_used"]}
         if warn:
             out["warnings"] = ["答案中的数字 " + "、".join(warn) + " 未在原文中出现，请核对引用"]
+    # 坑2 防护（360 七坑）：legal/labor 意图且答案编造了 KB 中不存在的法规引用 → 拒绝
+    block = citation_gate.evaluate(question, hits, out.get("answer", ""))
+    if block is not None:
+        return block
     # T3 记忆持久化 + T6 闭环学习（失败不影响主链路）
     try:
         memory.append(tenant_id, "user", question)

@@ -128,3 +128,5 @@ agent_created: true
 - `scripts/cos_upload_sdk.py` — ima 知识库上传（官方 COS SDK 版）
 - `references/shenzhen-labor-rules.md` — 深圳劳动争议核心裁判口径（逐条经元典核验，含效力状态与用法提示）
 - `references/defense-playbook.md` — 用人单位侧答辩打法手册（三件套结构、质证话术、制度硬伤自查清单、和解策略、期限红线）
+
+> **平台硬闸门（无引用不出文）**：MiniYuxi 已在 core/citation_gate.py 对法律/劳动类问答启用硬闸门——未命中知识库、或答案编造知识库中不存在的法规名时，平台直接拒绝生成法条，强制先上传原文或核验来源。本技能输出务必标注法条出处与效力状态，不得凭印象自由生成。

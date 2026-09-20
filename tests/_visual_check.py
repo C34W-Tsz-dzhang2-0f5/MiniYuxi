@@ -4,7 +4,7 @@ import sys
 from playwright.sync_api import sync_playwright
 
 BASE = "http://127.0.0.1:8801/"
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "_shots")
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "_shots")
 os.makedirs(OUT, exist_ok=True)
 
 errors = []

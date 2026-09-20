@@ -12,7 +12,7 @@ from playwright.sync_api import sync_playwright
 
 BASE = "http://127.0.0.1:8801/"
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "docs", "_shots")
+OUT = os.path.join(HERE, "..", "docs", "_shots")
 os.makedirs(OUT, exist_ok=True)
 
 ok_n = 0

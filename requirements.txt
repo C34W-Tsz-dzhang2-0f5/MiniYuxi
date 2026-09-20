@@ -16,3 +16,6 @@ pypdf>=4.2            # .pdf（兜底）
 
 # 可选：重排序 / BM25（当前版本用 SQLite FTS5 内置 bm25()，rank_bm25 仅备用）
 rank-bm25>=0.2.2
+
+# 测试 / CI：fastapi.testclient（路由冒烟、PR 卡点）需要 httpx
+httpx>=0.27

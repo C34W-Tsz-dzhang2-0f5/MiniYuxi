@@ -7,8 +7,8 @@ import subprocess
 import sys
 import time
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, BASE_DIR)
+ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+sys.path.insert(0, ROOT)
 
 import requests  # noqa: E402
 
@@ -86,11 +86,11 @@ def _free_port() -> int:
 def http_tests(port: int | None = None) -> None:
     print("\n── 接口层 ──")
     port = port or _free_port()
-    env = dict(os.environ, MINIYUXI_PORT=str(port), MINIYUXI_DB=str(os.path.join(BASE_DIR, "data", "selftest.db")))
+    env = dict(os.environ, MINIYUXI_PORT=str(port), MINIYUXI_DB=str(os.path.join(ROOT, "data", "selftest.db")))
     if os.path.exists(env["MINIYUXI_DB"]):
         os.remove(env["MINIYUXI_DB"])
     proc = subprocess.Popen([sys.executable, "run.py", "--no-open", "--port", str(port)],
-                            cwd=BASE_DIR, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     base = f"http://127.0.0.1:{port}"
     try:
         for _ in range(40):
