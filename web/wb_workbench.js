@@ -51,6 +51,7 @@
     { label: '新建', action: 'new' },
     { label: '导入', action: 'import' },
     { label: '知识库', action: 'kb' },
+    { label: 'HRM人事', action: 'hrm' },
     { label: '流程', action: 'flow' },
     { label: '模型切换', action: 'model' },
     { label: '成本管理', action: 'cost' },
@@ -224,6 +225,7 @@
       case 'new': startNewChat(); break;
       case 'import': openImportModal(); break;
       case 'kb': openKbModal(); break;
+      case 'hrm': openHrmModal(); break;
       case 'flow': openFlowModal(); break;
       case 'model': openModelCenter(); break;
       case 'cost': openCostModal(); break;
@@ -363,7 +365,15 @@
   }
 
   /* ---------------- 通用功能弹窗 ---------------- */
-  function openFeatureModal(title, bodyHtml, footHtml) {
+  function openFeatureModal(title, bodyHtml, footHtml, opts) {
+    opts = opts || {};
+    // wide=true 时放宽卡片宽度（HRM 这类需要左右分栏的模块），否则回落默认 560px
+    var card = $('#featureModal .my-modal__card');
+    if (card) {
+      card.style.width = opts.wide ? '94vw' : '';
+      card.style.maxWidth = opts.wide ? '1180px' : '';
+      card.style.maxHeight = opts.wide ? '86vh' : '';
+    }
     $('#fmTitle').textContent = title;
     $('#fmBody').innerHTML = bodyHtml || '';
     $('#fmFoot').innerHTML = footHtml || '';
@@ -427,6 +437,168 @@
           '<div class="fm-meta">来源：' + esc(d.mode || 'native') + '</div>';
       })
       .catch(function (e) { res.innerHTML = '<div class="fm-empty">提问失败：' + (e.message || e) + '</div>'; });
+  }
+
+  /* ---------------- HRM 人事管理系统（简道云迁移：49 表单数据驱动） ----------------
+     左：表单清单（可搜索）｜右：该表单数据表格 + 按 schema 动态生成的新建表单。
+     字段键统一用 fields[].col（w_xxx），与后端 /api/hrm/* 一致。            */
+  var HRM_FORMS = [], HRM_CUR = null, HRM_META = null;
+
+  function openHrmModal() {
+    openFeatureModal('HRM 人事管理系统',
+      '<div class="hrm-wrap">' +
+        '<div class="hrm-side">' +
+          '<input class="hrm-search" id="hrmSearch" placeholder="搜索表单（中文名 / key）">' +
+          '<ul class="hrm-forms" id="hrmForms"><li class="fm-empty">加载中…</li></ul>' +
+        '</div>' +
+        '<div class="hrm-main">' +
+          '<div class="hrm-bar">' +
+            '<span class="hrm-title" id="hrmTitle">请选择左侧表单</span>' +
+            '<span id="hrmMeta"></span><span class="sp"></span>' +
+            '<button class="fm-btn secondary" id="hrmNew">新建</button>' +
+            '<button class="fm-btn secondary" id="hrmRefresh">刷新</button>' +
+          '</div>' +
+          '<div class="hrm-scroll" id="hrmTable"><div class="fm-empty">—</div></div>' +
+          '<div id="hrmEdit"></div>' +
+        '</div>' +
+      '</div>',
+      '<span style="font-size:12px;color:#999">共 <b id="hrmCount">0</b> 张表单 · 数据来自 /api/hrm</span>' +
+      '<button class="fm-btn secondary" id="hrmClose">关闭</button>',
+      { wide: true });
+
+    $('#hrmClose').addEventListener('click', closeFeatureModal);
+    $('#hrmRefresh').addEventListener('click', function () { hrmLoadForms(); });
+    $('#hrmNew').addEventListener('click', function () { if (HRM_CUR) hrmOpenCreate(); });
+    $('#hrmSearch').addEventListener('input', function (e) { hrmRenderForms(e.target.value || ''); });
+    hrmLoadForms();
+  }
+
+  function hrmLoadForms() {
+    var box = $('#hrmForms');
+    if (box) box.innerHTML = '<li class="fm-empty">加载中…</li>';
+    wbFetch('/api/hrm/forms')
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (d) {
+        HRM_FORMS = (d && d.forms) || [];
+        var el = $('#hrmCount'); if (el) el.textContent = HRM_FORMS.length;
+        hrmRenderForms(($('#hrmSearch') || {}).value || '');
+      })
+      .catch(function (e) {
+        if (box) box.innerHTML = '<li class="fm-empty">加载失败：' + (e.message || e) + '</li>';
+      });
+  }
+
+  function hrmRenderForms(kw) {
+    var box = $('#hrmForms');
+    if (!box) return;
+    kw = (kw || '').trim().toLowerCase();
+    var list = HRM_FORMS.filter(function (f) {
+      return !kw || (f.name || '').toLowerCase().indexOf(kw) >= 0 || (f.key || '').toLowerCase().indexOf(kw) >= 0;
+    });
+    if (!list.length) { box.innerHTML = '<li class="fm-empty">无匹配表单</li>'; return; }
+    box.innerHTML = list.map(function (f) {
+      return '<li data-key="' + f.key + '" class="' + (HRM_CUR === f.key ? 'on' : '') + '">' +
+             '<span>' + esc(f.name) + '</span>' +
+             '<span class="k">' + (f.has_flow ? '流程 ' : '') + f.field_count + '</span></li>';
+    }).join('');
+    $$('#hrmForms li').forEach(function (li) {
+      li.addEventListener('click', function () { hrmSelect(li.dataset.key); });
+    });
+  }
+
+  function hrmSelect(key) {
+    HRM_CUR = key; HRM_META = null;
+    $('#hrmEdit').innerHTML = '';
+    hrmRenderForms(($('#hrmSearch') || {}).value || '');
+    var fm = HRM_FORMS.filter(function (f) { return f.key === key; })[0];
+    $('#hrmTitle').textContent = fm ? fm.name : key;
+    $('#hrmMeta').innerHTML = fm ? '<span class="hrm-tag' + (fm.has_flow ? ' flow' : '') + '">' +
+      (fm.has_flow ? '审批流' : '数据表') + '</span> <span class="hrm-tag">' + fm.field_count + ' 字段</span>' +
+      (fm.subform_count ? ' <span class="hrm-tag">' + fm.subform_count + ' 子表单</span>' : '') : '';
+    $('#hrmTable').innerHTML = '<div class="fm-empty">加载中…</div>';
+    Promise.all([
+      wbFetch('/api/hrm/meta/' + key).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
+      wbFetch('/api/hrm/' + key + '?size=50').then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    ]).then(function (res) {
+      HRM_META = res[0];
+      hrmRenderTable(res[1] && res[1].rows ? res[1].rows : []);
+    }).catch(function (e) {
+      $('#hrmTable').innerHTML = '<div class="fm-empty">加载失败：' + (e.message || e) + '</div>';
+    });
+  }
+
+  function hrmRenderTable(rows) {
+    var box = $('#hrmTable');
+    if (!box) return;
+    var meta = HRM_META || {};
+    var fields = (meta.fields || []).filter(function (f) { return f.type !== 'separator' && f.type !== 'subform'; });
+    if (!rows.length) { box.innerHTML = '<div class="fm-empty">该表单暂无数据</div>'; return; }
+    var head = fields.slice(0, 12).map(function (f) { return '<th>' + esc(f.label) + '</th>'; }).join('');
+    var body = rows.map(function (r) {
+      return '<tr>' + fields.slice(0, 12).map(function (f) {
+        var v = r[f.col];
+        if (v && typeof v === 'object') v = JSON.stringify(v);
+        return '<td title="' + esc(String(v == null ? '' : v)) + '">' + esc(String(v == null ? '' : v)) + '</td>';
+      }).join('') + '</tr>';
+    }).join('');
+    box.innerHTML = '<table class="hrm-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table>' +
+      '<div style="padding:8px;font-size:12px;color:#999">显示 ' + rows.length + ' 条（最多 50）' +
+      (fields.length > 12 ? ' · 仅显示前 12 个字段，共 ' + fields.length + ' 个' : '') + '</div>';
+  }
+
+  function hrmOpenCreate() {
+    var meta = HRM_META;
+    if (!meta) { toast('表单结构未加载完成'); return; }
+    var fields = (meta.fields || []).filter(function (f) { return f.type !== 'separator' && f.type !== 'subform'; });
+    var opts = function (f) {
+      var os = f.options || [];
+      if (!os.length) return '';
+      return '<datalist id="dl_' + f.col + '">' + os.map(function (o) {
+        return '<option value="' + esc(String(o.label || o.value)) + '"></option>';
+      }).join('') + '</datalist>';
+    };
+    $('#hrmEdit').innerHTML =
+      '<div class="fm-sub">新建「' + esc(meta.name || HRM_CUR) + '」记录' +
+      (fields.filter(function (f) { return f.required; }).length ? '（<span style="color:#b26a00">* 为必填</span>）' : '') + '</div>' +
+      '<div class="hrm-edit">' + fields.slice(0, 20).map(function (f) {
+        var t = (f.type === 'number') ? 'number' : (f.type === 'datetime' ? 'text' : 'text');
+        return '<div><label>' + esc(f.label) + (f.required ? ' *' : '') +
+               ' <span style="color:#bbb">' + esc(f.type) + '</span></label>' +
+               '<input id="nf_' + f.col + '" type="' + t + '"' +
+               (f.type === 'datetime' ? ' placeholder="YYYY-MM-DD"' : '') +
+               ' list="dl_' + f.col + '">' + opts(f) + '</div>';
+      }).join('') + '</div>' +
+      '<div class="fm-row" style="margin-top:10px">' +
+        '<button class="fm-btn" id="hrmSubmit">提交</button>' +
+        '<button class="fm-btn secondary" id="hrmCancel">取消</button>' +
+        '<span id="hrmMsg" style="font-size:12px;color:#999"></span></div>' +
+      (fields.length > 20 ? '<div style="font-size:12px;color:#999">共 ' + fields.length + ' 字段，此处仅展示前 20 个，其余可用 API 写入</div>' : '');
+    $('#hrmCancel').addEventListener('click', function () { $('#hrmEdit').innerHTML = ''; });
+    $('#hrmSubmit').addEventListener('click', hrmSubmitCreate);
+  }
+
+  function hrmSubmitCreate() {
+    var meta = HRM_META; if (!meta) return;
+    var fields = (meta.fields || []).filter(function (f) { return f.type !== 'separator' && f.type !== 'subform'; });
+    var data = {}, missing = [];
+    fields.slice(0, 20).forEach(function (f) {
+      var el = $('#nf_' + f.col); if (!el) return;
+      var v = (el.value || '').trim();
+      if (!v) { if (f.required) missing.push(f.label); return; }
+      data[f.col] = (f.type === 'number') ? Number(v) : v;
+    });
+    var msg = $('#hrmMsg');
+    if (missing.length) { msg.textContent = '请填写必填项：' + missing.join('、'); msg.style.color = '#d33'; return; }
+    msg.textContent = '提交中…'; msg.style.color = '#999';
+    wbFetch('/api/hrm/' + HRM_CUR, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+    }).then(function (r) {
+      return r.json().then(function (j) { if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status)); return j; });
+    }).then(function () {
+      msg.textContent = '已保存'; msg.style.color = '#1a7f37';
+      $('#hrmEdit').innerHTML = '';
+      hrmSelect(HRM_CUR);
+    }).catch(function (e) { msg.textContent = '保存失败：' + (e.message || e); msg.style.color = '#d33'; });
   }
 
   /* ---------------- 系统管理弹窗（B 方案：自助改密 + 用户管理）---------------- */
