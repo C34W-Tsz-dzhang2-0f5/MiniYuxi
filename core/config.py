@@ -58,9 +58,11 @@ PORT = int(os.getenv("MINIYUXI_PORT", "8801"))
 # ---------- 角色权限矩阵（RBAC）----------
 # 对象: 动作
 ROLE_PERMS = {
-    "admin":  {"kb.read", "kb.write", "kb.delete", "chat", "agent.run", "tenant.manage", "user.manage", "audit.read"},
-    "editor": {"kb.read", "kb.write", "chat", "agent.run"},
-    "viewer": {"kb.read", "chat"},
+    "admin":  {"kb.read", "kb.write", "kb.delete", "chat", "agent.run", "tenant.manage", "user.manage", "audit.read",
+               "hrm.read", "hrm.write", "hrm.delete", "hrm.flow", "hrm.admin"},
+    "editor": {"kb.read", "kb.write", "chat", "agent.run",
+               "hrm.read", "hrm.write", "hrm.flow"},
+    "viewer": {"kb.read", "chat", "hrm.read"},
 }
 
 

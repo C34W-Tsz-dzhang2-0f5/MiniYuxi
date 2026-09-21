@@ -7,7 +7,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, Body
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -52,6 +52,8 @@ import core.labor_relations as labor_relations
 import core.salary_records as salary_records
 import core.resume_screening as resume_screening
 import core.backup as backup
+# ---- HRM 人事管理系统（简道云逆向迁移）----
+import core.hrm as hrm
 
 # ---- 运行时建表（绕开冻结的 db.py），失败不阻塞主链路 ----
 try:
@@ -81,6 +83,7 @@ try:
     taskflow.init()  # 岗位任务流：加载 task_library.json + 初始化审计/编排
     labor_relations.init()
     salary_records.init()
+    hrm.init()  # HRM 人事管理系统（简道云逆向迁移）：49 张表单运行时建表
 except Exception:
     pass
 
@@ -1469,6 +1472,126 @@ def resume_screen(body: ResumeScreenIn, p: auth.Principal = Depends(need("chat")
     """规则引擎初筛（DeepSeek 离线降级 / 双轨交叉校验用）。"""
     return resume_screening.screen_resume(body.text, body.role, body.hard_cond or None,
                                           body.weights or None)
+
+
+# ---------------- HRM 人事管理系统（简道云逆向迁移）----------------
+# 数据驱动：表/字段来自 core/hrm_schema.json（49 张表单逆向结构）。
+# 字段 API key = 表单 schema 的 fields[].col（w_<hex>）；子表单以 {col:[...]} 内嵌。
+@app.get("/api/hrm/forms")
+def hrm_forms(p: auth.Principal = Depends(need("hrm.read"))):
+    """列出全部 49 张表单的元信息。"""
+    return {"forms": hrm.list_forms()}
+
+
+def _hrm_perm(form_key, p, action):
+    """按简道云 authGroups 的数据权限位校验，无权则 403。"""
+    if not hrm.check_perm(form_key, p, action):
+        raise HTTPException(403, f"当前角色在表单[{form_key}]上无 {action} 权限")
+
+
+# 注意：静态路径（meta / flows）必须声明在 {form_key} 通配路由之前，否则被通配截胡。
+@app.get("/api/hrm/meta/{form_key}")
+def hrm_meta(form_key: str, p: auth.Principal = Depends(need("hrm.read"))):
+    """表单结构（字段/子表单/权限组/视图），供前端动态渲染。"""
+    d = hrm.form_meta(form_key)
+    if d is None:
+        raise HTTPException(404, "表单不存在")
+    return d
+
+
+@app.get("/api/hrm/perm/{form_key}")
+def hrm_perm(form_key: str, p: auth.Principal = Depends(need("hrm.read"))):
+    """该表单的权限矩阵（对照简道云后台 authGroups 配置）。"""
+    try:
+        return {"form": form_key, "matrix": hrm.perm_matrix(form_key)}
+    except KeyError:
+        raise HTTPException(404, "表单不存在")
+
+
+@app.get("/api/hrm/flows/pending")
+def hrm_flows_pending(p: auth.Principal = Depends(need("hrm.flow"))):
+    """待审批列表。"""
+    return {"instances": hrm.flow_list_pending(p.tenant_id)}
+
+
+@app.post("/api/hrm/flows/{instance_id}/decide")
+def hrm_flow_decide(instance_id: str, approve: bool = Body(...), note: str = Body(""),
+                    p: auth.Principal = Depends(need("hrm.flow"))):
+    """审批通过/驳回。"""
+    try:
+        return hrm.flow_decide(instance_id, approve, p.username, note)
+    except KeyError:
+        raise HTTPException(404, "流程实例不存在")
+
+
+@app.get("/api/hrm/{form_key}")
+def hrm_rows(form_key: str, view: str = "", page: int = 1, size: int = 50,
+             p: auth.Principal = Depends(need("hrm.read"))):
+    """列表/视图查询（view=视图名时按存储的 sort 还原）。"""
+    try:
+        _hrm_perm(form_key, p, "read")
+        return {"rows": hrm.row_list(form_key, p, view or None, page, size)}
+    except KeyError:
+        raise HTTPException(404, "表单不存在")
+
+
+@app.post("/api/hrm/{form_key}")
+def hrm_create(form_key: str, data: dict = Body(default={}),
+               p: auth.Principal = Depends(need("hrm.write"))):
+    """新建记录（键可为列名或中文字段标题；sn 缺省自动生成；子表单随主表写入）。"""
+    try:
+        _hrm_perm(form_key, p, "create")
+        return hrm.row_create(form_key, data, p)
+    except KeyError:
+        raise HTTPException(404, "表单不存在")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/hrm/{form_key}/{rid}")
+def hrm_get(form_key: str, rid: str, p: auth.Principal = Depends(need("hrm.read"))):
+    """获取单条（含子表单）。"""
+    try:
+        _hrm_perm(form_key, p, "read")
+        d = hrm.row_get(form_key, rid, p)
+    except KeyError:
+        raise HTTPException(404, "表单不存在")
+    if d is None:
+        raise HTTPException(404, "记录不存在")
+    return d
+
+
+@app.put("/api/hrm/{form_key}/{rid}")
+def hrm_update(form_key: str, rid: str, data: dict = Body(default={}),
+               p: auth.Principal = Depends(need("hrm.write"))):
+    """更新记录（子表单整体替换）。"""
+    try:
+        _hrm_perm(form_key, p, "update")
+        return hrm.row_update(form_key, rid, data, p)
+    except KeyError:
+        raise HTTPException(404, "表单不存在")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/hrm/{form_key}/{rid}")
+def hrm_delete(form_key: str, rid: str, p: auth.Principal = Depends(need("hrm.delete"))):
+    """删除记录（级联删子表单）。"""
+    try:
+        _hrm_perm(form_key, p, "delete")
+        return hrm.row_delete(form_key, rid, p)
+    except KeyError:
+        raise HTTPException(404, "表单不存在")
+
+
+@app.post("/api/hrm/{form_key}/{rid}/submit")
+def hrm_flow_submit(form_key: str, rid: str, p: auth.Principal = Depends(need("hrm.flow"))):
+    """提交审批流（hasFlow 表单）。"""
+    try:
+        _hrm_perm(form_key, p, "flow")
+        return hrm.flow_submit(form_key, rid, p)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
 
 
 # ---------------- 前端 ----------------
