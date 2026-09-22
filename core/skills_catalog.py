@@ -18,9 +18,18 @@ import re
 SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills")
 
 
-def _parse_frontmatter(text: str):
-    """解析 YAML frontmatter（简单 key: value，被 --- 包裹）。
+def _strip_quotes(v: str) -> str:
+    """剥离 YAML 标量外侧成对引号（name: "xxx" → xxx），避免脏引号污染下游。"""
+    v = v.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+        v = v[1:-1].strip()
+    return v
 
+
+def _parse_frontmatter(text: str):
+    """解析 YAML frontmatter（被 --- 包裹）。
+
+    支持：key: value（自动剥引号）、块标量 key: | / >（收集缩进行）。
     返回 {"meta": {...}, "body": str}；无 frontmatter 或缺少 name 则返回 None（视为损坏/跳过）。
     """
     m = re.match(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", text, re.S)
@@ -28,14 +37,31 @@ def _parse_frontmatter(text: str):
         return None
     meta_raw, body = m.group(1), m.group(2)
     meta = {}
-    for line in meta_raw.splitlines():
-        s = line.strip()
-        if not s or s.startswith("#"):
+    lines = meta_raw.splitlines()
+    i = 0
+    while i < len(lines):
+        s = lines[i].strip()
+        if not s or s.startswith("#") or ":" not in s:
+            i += 1
             continue
-        if ":" in s:
-            k, v = s.split(":", 1)
-            meta[k.strip().lower()] = v.strip()
+        k, v = s.split(":", 1)
+        k = k.strip().lower()
+        v = v.strip()
+        if v in ("|", ">", "|-", ">-", "|+", ">+"):
+            # 块标量：收集后续缩进/空行，直到出现顶格 key
+            block = []
+            i += 1
+            while i < len(lines) and (lines[i][:1] in (" ", "\t") or not lines[i].strip()):
+                if lines[i].strip():
+                    block.append(lines[i].strip())
+                i += 1
+            meta[k] = "\n".join(block).strip()
+            continue
+        meta[k] = _strip_quotes(v)
+        i += 1
     if not meta.get("name"):
+        meta["name"] = ""
+    if not meta["name"]:
         return None
     return {"meta": meta, "body": body}
 

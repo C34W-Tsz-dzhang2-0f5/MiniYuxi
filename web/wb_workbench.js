@@ -1610,20 +1610,29 @@
   function closeToolMenu() { $('#toolMenu').hidden = true; $('#toolDrawer').hidden = true; }
 
   /* 二级抽屉：复用 #toolDrawer，按类别渲染列表 */
+  function escAttr(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function escHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
   function openDrawer(title, items, opts) {
     opts = opts || {};
     $('#toolDrawerTitle').textContent = title;
     var body = $('#toolDrawerBody');
     if (!items || !items.length) {
-      body.innerHTML = '<div class="tool-menu__empty">暂无可选' + title + '</div>';
+      body.innerHTML = '<div class="tool-menu__empty">暂无可选' + escHtml(title) + '</div>';
     } else {
       body.innerHTML = items.map(function (it) {
         var active = opts.isActive ? opts.isActive(it) : false;
+        var ttl = it.title || it.name || '未命名';
         return '<button class="tool-menu__option' + (active ? ' on' : '') +
-               '" data-id="' + (it.id || '') + '" data-title="' + (it.title || it.name || '') + '">' +
+               '" data-id="' + escAttr(it.id) + '" data-title="' + escAttr(ttl) + '">' +
                '<span class="tool-menu__option-main">' +
-               '<span class="tool-menu__option-title">' + (it.title || it.name || '未命名') + '</span>' +
-               (it.sub ? '<span class="tool-menu__option-desc">' + it.sub + '</span>' : '') +
+               '<span class="tool-menu__option-title">' + escHtml(ttl) + '</span>' +
+               (it.sub ? '<span class="tool-menu__option-desc">' + escHtml(it.sub) + '</span>' : '') +
                '</span></button>';
       }).join('');
       $$('#toolDrawerBody .tool-menu__option').forEach(function (el) {
