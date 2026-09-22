@@ -8,7 +8,10 @@
 > **把 Agent 跑进企业工作流**——Web / Desktop / CLI 三端共享同一套内核，SQLite 单文件、零外部服务、可审计。
 > 内核只写一次，三端只是外壳；工具、记忆、权限、审计天然一致。
 
-![三端统一工作台原型](web/prototype/index.html)
+![MiniYuxi 三端统一工作台](docs/assets/readme_hero.png)
+
+> 🖥️ **桌面版安装包**（Windows x64，含内置 Python 内核，双击即用）：
+> [MiniYuxi_0.2.0_x64_en-US.msi](https://github.com/C34W-Tsz-dzhang2-0f5/MiniYuxi/releases/latest/download/MiniYuxi_0.2.0_x64_en-US.msi)（84 MB）
 
 ## ✨ 核心特性
 

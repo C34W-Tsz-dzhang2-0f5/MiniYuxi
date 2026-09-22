@@ -44,6 +44,9 @@ jd_err.txt
 index.html.bak_*
 index_legacy.html
 
+# 例外：落地页/文档图片是仓库资产，必须入库（过程截图 docs/_shots/ 仍按上面规则忽略）
+!docs/assets/*.png
+
 # ===== Personal / dev QA scripts that embed real keys =====
 verify_*.py
 test_*.py
