@@ -1774,8 +1774,8 @@
         isActive: function (it) { return String(it.id) === String(state.skill); },
         onPick: function (id, title) {
           state.skill = id; refreshToolHints();
-          insertAtCursor($('#composerInput'), '/' + title + ' ');
-          toast('已调用技能：' + title);
+          insertAtCursor($('#composerInput'), '/' + (title || id) + ' ');
+          toast('已调用技能：' + (title || id));
         }
       });
     }).catch(function (e) { toast('技能列表加载失败：' + (e.message || e)); });
@@ -1859,9 +1859,10 @@
     $('#btnSend').addEventListener('click', function () { send(getText($('#composerInput')), $('#composerInput')); });
     $('#btnSendDock').addEventListener('click', function () { send(getText($('#composerInputDock')), $('#composerInputDock')); });
 
-    // 快捷插入 @ /
+    // 快捷插入 @ /（无 data-insert 的按钮——如「工具」菜单按钮——只开菜单，不插入文本）
     $$('.composer-tool').forEach(function (b) {
       b.addEventListener('click', function () {
+        if (!b.dataset.insert) return;
         var target = $(b.dataset.target ? '#' + b.dataset.target : '#composerInput');
         target.textContent += b.dataset.insert;
         target.focus();
