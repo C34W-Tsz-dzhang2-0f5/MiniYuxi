@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 🔒 安全漏洞上报
+    url: https://github.com/C34W-Tsz-dzhang2-0f5/MiniYuxi/security/advisories/new
+    about: 请勿公开披露安全漏洞，请走私有安全通告。
+  - name: 💬 社区讨论
+    url: https://github.com/C34W-Tsz-dzhang2-0f5/MiniYuxi/discussions
+    about: 想法交流、使用问答、路线图讨论来这里。

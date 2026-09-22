@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MiniYuxi · 企业级 AI 助手工作台（原型）</title>
+<style>
+  :root{
+    --brand:#2563eb; --brand-2:#0ea5e9; --bg:#f8fafc; --surface:#ffffff;
+    --text:#0f172a; --muted:#64748b; --border:#e2e8f0; --ok:#16a34a;
+    --radius:12px; --shadow:0 1px 3px rgba(15,23,42,.08),0 8px 24px rgba(15,23,42,.06);
+    --font: -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--bg);color:var(--text);height:100vh;overflow:hidden;display:flex;flex-direction:column}
+  /* ---- top bar ---- */
+  .topbar{height:56px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 18px;gap:14px;flex-shrink:0}
+  .logo{display:flex;align-items:center;gap:9px;font-weight:700;font-size:16px}
+  .logo .mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;display:grid;place-items:center;font-size:14px;font-weight:800}
+  .tag{font-size:12px;color:var(--muted);font-weight:500}
+  .spacer{flex:1}
+  .endswitch{display:flex;background:var(--bg);border:1px solid var(--border);border-radius:999px;padding:3px}
+  .endswitch button{border:0;background:transparent;color:var(--muted);font-family:var(--font);font-size:13px;padding:6px 14px;border-radius:999px;cursor:pointer;font-weight:600}
+  .endswitch button.active{background:var(--brand);color:#fff;box-shadow:var(--shadow)}
+  .avatar{width:32px;height:32px;border-radius:50%;background:var(--brand);color:#fff;display:grid;place-items:center;font-size:13px;font-weight:700}
+  /* ---- body ---- */
+  .body{flex:1;display:flex;min-height:0}
+  .sidebar{width:212px;background:var(--surface);border-right:1px solid var(--border);padding:14px 10px;display:flex;flex-direction:column;flex-shrink:0}
+  .navitem{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;color:var(--muted);font-size:14px;font-weight:500;cursor:pointer;margin-bottom:4px}
+  .navitem .ico{width:18px;text-align:center}
+  .navitem.active{background:rgba(37,99,235,.10);color:var(--brand);font-weight:600}
+  .navitem:hover{background:var(--bg)}
+  .status{margin-top:auto;font-size:12px;color:var(--muted);padding:10px 12px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(22,163,74,.18)}
+  /* ---- main ---- */
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .chat{flex:1;overflow-y:auto;padding:26px 0;display:flex;flex-direction:column;gap:18px}
+  .chat-inner{max-width:780px;width:100%;margin:0 auto;padding:0 24px}
+  .msg{display:flex;gap:12px}
+  .msg .bubble{padding:13px 16px;border-radius:14px;font-size:14.5px;line-height:1.65;max-width:88%}
+  .msg.user{flex-direction:row-reverse}
+  .msg.user .bubble{background:var(--brand);color:#fff;border-bottom-right-radius:4px}
+  .msg.bot .bubble{background:var(--surface);border:1px solid var(--border);border-bottom-left-radius:4px;box-shadow:var(--shadow)}
+  .who{font-size:12px;color:var(--muted);margin-bottom:3px;font-weight:600}
+  .cite{display:inline-flex;align-items:center;gap:4px;font-size:12px;background:rgba(37,99,235,.10);color:var(--brand);padding:2px 8px;border-radius:6px;margin:0 3px;font-weight:600}
+  .think{font-size:12px;color:var(--muted);border-left:3px solid var(--border);padding:4px 10px;margin-top:8px;background:var(--bg);border-radius:0 8px 8px 0}
+  .composer{max-width:780px;width:100%;margin:0 auto;padding:14px 24px 22px}
+  .composer .box{display:flex;gap:10px;align-items:flex-end;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:10px 12px;box-shadow:var(--shadow)}
+  .composer textarea{flex:1;border:0;resize:none;outline:0;font-family:var(--font);font-size:14.5px;line-height:1.5;max-height:120px;background:transparent;color:var(--text)}
+  .send{background:var(--brand);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-weight:600;cursor:pointer;font-size:14px}
+  .send:hover{background:#1d4ed8}
+  /* ---- right panel ---- */
+  .right{width:268px;background:var(--surface);border-left:1px solid var(--border);padding:16px;overflow-y:auto;flex-shrink:0}
+  .card{background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:13px;margin-bottom:14px}
+  .card h4{font-size:13px;color:var(--text);margin-bottom:9px;display:flex;align-items:center;gap:7px}
+  .pill{display:inline-block;font-size:11px;background:rgba(37,99,235,.10);color:var(--brand);padding:3px 8px;border-radius:999px;margin:2px 3px 2px 0;font-weight:600}
+  .usage{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:4px}
+  .bar{height:6px;background:var(--border);border-radius:999px;overflow:hidden;margin-top:6px}
+  .bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--brand),var(--brand-2));width:38%}
+  .ribbon{font-size:11px;color:var(--muted);text-align:center;padding:8px;border-top:1px solid var(--border);background:var(--surface)}
+  .ribbon b{color:var(--brand)}
+  /* placeholder views */
+  .view{display:none;flex:1;overflow-y:auto;padding:30px 24px}
+  .view.active{display:block}
+  .grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;max-width:900px}
+  .tile{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:var(--shadow)}
+  .tile h3{font-size:15px;margin-bottom:6px}
+  .tile p{font-size:13px;color:var(--muted);line-height:1.6}
+</style>
+</head>
+<body>
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div class="logo"><span class="mark">M</span><span>MiniYuxi</span></div>
+    <span class="tag">企业级 AI 助手 · 三端统一内核</span>
+    <div class="spacer"></div>
+    <div class="endswitch" id="endswitch">
+      <button data-end="web" class="active">🌐 Web</button>
+      <button data-end="desktop">🖥️ Desktop</button>
+      <button data-end="cli">⌨️ CLI</button>
+    </div>
+    <div class="avatar">管</div>
+  </div>
+
+  <div class="body">
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+      <div class="navitem active" data-view="chat"><span class="ico">💬</span>对话</div>
+      <div class="navitem" data-view="kb"><span class="ico">📚</span>知识库</div>
+      <div class="navitem" data-view="tools"><span class="ico">🧰</span>工具箱</div>
+      <div class="navitem" data-view="skills"><span class="ico">⚡</span>技能</div>
+      <div class="navitem" data-view="cron"><span class="ico">⏰</span>定时任务</div>
+      <div class="navitem" data-view="audit"><span class="ico">🛡️</span>审计日志</div>
+      <div class="navitem" data-view="settings"><span class="ico">⚙️</span>设置</div>
+      <div class="status"><span class="dot"></span>内核在线 · 3 端点共享同一会话</div>
+    </div>
+
+    <!-- MAIN -->
+    <div class="main">
+      <!-- CHAT VIEW -->
+      <div class="view active" id="view-chat" style="display:flex;flex-direction:column">
+        <div class="chat" id="chat">
+          <div class="chat-inner">
+            <div class="msg bot">
+              <div>
+                <div class="who">MiniYuxi</div>
+                <div class="bubble">你好，我是 MiniYuxi 企业级助手。无论你从 <b>Web / Desktop / CLI</b> 哪个端进来，背后都是同一套内核：Agent Loop、工具注册表、RAG 知识库与审计沙箱。试试问我「劳动合同到期前需要做什么预警？」</div>
+              </div>
+            </div>
+            <div class="msg user">
+              <div><div class="who">你</div><div class="bubble">劳动合同到期前需要做什么预警？</div></div>
+            </div>
+            <div class="msg bot">
+              <div>
+                <div class="who">MiniYuxi</div>
+                <div class="bubble">根据《劳动合同法》第 44、46 条及深圳本地口径，建议在到期前 <b>30 日</b>触发预警并书面征询续订意向：<br/>① 不续订需支付经济补偿（N）；② 连续订立二次固定期限合同后应签无固定期限<span class="cite">📎 劳动合同法·第四十四条</span>；③ 女职工「三期」内不得终止<span class="cite">📎 深圳中院口径</span>。<div class="think">已检索知识库 12 篇、命中 3 条权威来源、路由 DeepSeek-V3 · 成本 ¥0.002</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="composer">
+          <div class="box">
+            <textarea id="input" rows="1" placeholder="输入指令，Enter 发送（Shift+Enter 换行）…"></textarea>
+            <button class="send" id="send">发送</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- OTHER VIEWS (prototype placeholders) -->
+      <div class="view" id="view-kb"><div class="grid2">
+        <div class="tile"><h3>📚 知识库</h3><p>BM25 + 向量 RRF 融合检索；bigram 中文分词；sqlite-vec 零服务。已索引 12 篇 Hermes 源码解读。</p></div>
+        <div class="tile"><h3>➕ 上传</h3><p>拖拽 PDF/Word/Markdown，自动分块、Embedding、写入可审计引用。</p></div>
+      </div></div>
+      <div class="view" id="view-tools"><div class="grid2">
+        <div class="tile"><h3>🧰 工具注册表</h3><p>内置 20+ 工具 + toolset 过滤 + 审批门；MCP 发现结果 60s TTL 缓存。</p></div>
+        <div class="tile"><h3>🔌 MCP 连接器</h3><p>标准协议发现 / 信任 / 调用；危险命令 hardline 拦截。</p></div>
+      </div></div>
+      <div class="view" id="view-skills"><div class="grid2">
+        <div class="tile"><h3>⚡ 技能</h3><p>SKILL.md 渐进加载；目录 mtime 缓存扫描；当前 6 个启用。</p></div>
+        <div class="tile"><h3>🤖 SubAgent</h3><p>asTool 封装 / Team 黑板协作两种模式。</p></div>
+      </div></div>
+      <div class="view" id="view-cron"><div class="grid2">
+        <div class="tile"><h3>⏰ 定时任务</h3><p>Cron = Agent 任务：fresh session 执行；script 类型限 scripts/ 根 + 安全校验；未知类型 fail-closed。</p></div>
+        <div class="tile"><h3>📤 交付</h3><p>结果写 data/cron_agent_runs.log，支持 log / 企微 / 邮件投递。</p></div>
+      </div></div>
+      <div class="view" id="view-audit"><div class="grid2">
+        <div class="tile"><h3>🛡️ 审计沙箱</h3><p>append-only 哈希链；命令策略分层 hardline→审批→path 校验→审计。</p></div>
+        <div class="tile"><h3>✅ 合规闸门</h3><p>「无引用不出文」；法条与地方口径引用前强制效力核验。</p></div>
+      </div></div>
+      <div class="view" id="view-settings"><div class="grid2">
+        <div class="tile"><h3>⚙️ 多端设置</h3><p>三端共享同一配置与 RBAC；admin/editor/viewer 角色矩阵在 core/config.py。</p></div>
+        <div class="tile"><h3>🔑 Provider</h3><p>DeepSeek / OpenAI / Anthropic 多 provider 归一适配，故障转移。</p></div>
+      </div></div>
+    </div>
+
+    <!-- RIGHT PANEL -->
+    <div class="right">
+      <div class="card">
+        <h4>🧠 记忆分层</h4>
+        <span class="pill">工作区</span><span class="pill">用户级</span><span class="pill">云端召回</span>
+      </div>
+      <div class="card">
+        <h4>⚡ 已加载技能</h4>
+        <span class="pill">labor-dispute</span><span class="pill">hr-handbook</span><span class="pill">gongwen</span><span class="pill">typesafe-ai</span>
+      </div>
+      <div class="card">
+        <h4>📊 会话用量</h4>
+        <div class="usage"><span>Token</span><span>8,412 / 22k</span></div>
+        <div class="bar"><i></i></div>
+        <div class="usage"><span>本月成本</span><span>¥ 3.18</span></div>
+      </div>
+      <div class="card">
+        <h4>🖧 当前端</h4>
+        <div class="usage"><span id="curEnd">Web · 127.0.0.1:8801</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ribbon">原型预览 · 三端统一内核（Web / Desktop / CLI）· 真实按钮可点 · <b>WorkBuddy 设计</b></div>
+
+<script>
+  // 端切换
+  const endMap={web:"Web · 127.0.0.1:8801",desktop:"Desktop · Tauri sidecar",cli:"CLI · miniyuxi chat"};
+  document.getElementById('endswitch').addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b)return;
+    document.querySelectorAll('#endswitch button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    document.getElementById('curEnd').textContent=endMap[b.dataset.end];
+  });
+  // 导航切换
+  document.querySelectorAll('.navitem').forEach(n=>{
+    n.addEventListener('click',()=>{
+      document.querySelectorAll('.navitem').forEach(x=>x.classList.remove('active'));
+      n.classList.add('active');
+      document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+      const v=document.getElementById('view-'+n.dataset.view);
+      v.classList.add('active');
+      if(n.dataset.view==='chat'){v.style.display='flex';}else{v.style.display='block';}
+    });
+  });
+  // 发送（原型：回显 + 模拟回复）
+  const input=document.getElementById('input'),chat=document.getElementById('chat'),send=document.getElementById('send');
+  function post(){
+    const t=input.value.trim(); if(!t)return;
+    const ci=document.createElement('div');ci.className='chat-inner';
+    ci.innerHTML=`<div class="msg user"><div><div class="who">你</div><div class="bubble"></div></div></div>`;
+    ci.querySelector('.bubble').textContent=t; chat.appendChild(ci);
+    input.value='';
+    setTimeout(()=>{
+      const bi=document.createElement('div');bi.className='chat-inner';
+      bi.innerHTML=`<div class="msg bot"><div><div class="who">MiniYuxi</div><div class="bubble">（原型）已收到指令，将调用统一内核处理。生产环境此处接 /api/wb/chat，三端共用同一 Agent Loop 与工具注册表。</div></div></div>`;
+      chat.appendChild(bi); chat.scrollTop=chat.scrollHeight;
+    },450);
+    chat.scrollTop=chat.scrollHeight;
+  }
+  send.addEventListener('click',post);
+  input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();post();}});
+</script>
+</body>
+</html>

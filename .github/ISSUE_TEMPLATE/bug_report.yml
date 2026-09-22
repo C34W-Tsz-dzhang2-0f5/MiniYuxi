@@ -1,0 +1,37 @@
+name: Bug 报告
+description: 报告一个可复现的问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: 问题描述
+      description: 发生了什么？期望是什么？
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 一步步如何触发
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: MiniYuxi 版本 / 提交号
+    validations:
+      required: true
+  - type: dropdown
+    id: end
+    attributes:
+      label: 受影响端
+      options: ["Web", "Desktop", "CLI", "内核/core", "不确定"]
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 报错
+      render: shell
