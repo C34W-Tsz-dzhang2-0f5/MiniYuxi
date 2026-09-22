@@ -146,13 +146,73 @@ def _register_default_jobs() -> None:
 
 
 def _run_job(payload: dict) -> None:
-    action = (payload or {}).get("action")
+    """通用定时任务分发（对应 Hermes 十·Cron=Agent 任务）。
+
+    支持三类 payload：
+      - {"action": "labor_sync" | "daily_backup"}   旧式硬编码业务动作（向后兼容）
+      - {"kind": "agent", "prompt": "...",          真·Agent 任务：用 rag.answer 跑一个
+         "skills"?: [...], "model"?: "...",         fresh session（不继承聊天历史），
+         "deliver"?: "wecom"/"log"}                 结果按 deliver 投递
+      - {"kind": "script", "path": "scripts/xxx.py"} 受控脚本任务：路径须落在允许根目录内，
+                                                经安全校验后执行（绝不直接执行任意命令）
+    未知 kind → 记审计后 fail-closed（不静默跳过，也不盲执行）。
+    """
+    p = payload or {}
+
+    # 旧式 action（兼容已注册任务）
+    action = p.get("action")
     if action == "labor_sync":
         from core import labor_relations
         labor_relations.sync_all()
-    elif action == "daily_backup":
+        return
+    if action == "daily_backup":
         from core import backup
         backup.daily_backup()
+        return
+
+    kind = p.get("kind")
+    if kind == "agent":
+        prompt = (p.get("prompt") or "").strip()
+        if not prompt:
+            print(f"  ✗ Cron agent 任务缺少 prompt，跳过：{p}")
+            return
+        from core import rag
+        # fresh session：history=None → 不继承任何聊天历史，prompt 必须自包含
+        try:
+            res = rag.answer("default", prompt, history=None)
+            answer = (res or {}).get("answer") or ""
+            print(f"  ✓ Cron agent 任务完成（{len(answer)} 字）")
+            if p.get("deliver") == "log":
+                import datetime as _dt
+                log_path = os.path.join(BASE_DIR, "data", "cron_agent_runs.log")
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(f"[{_dt.datetime.now()}] {prompt[:60]}\n{answer}\n\n")
+        except Exception as exc:
+            print(f"  ✗ Cron agent 任务异常：{exc}")
+        return
+
+    if kind == "script":
+        script_path = p.get("path") or ""
+        try:
+            from core import security
+            allowed_root = os.path.join(BASE_DIR, "scripts")
+            if not security.validate_within_dir(script_path, allowed_root):
+                print(f"  ✗ Cron script 路径越权被拦截：{script_path}")
+                return
+            ok, reason = security.validate_script(open(script_path, encoding="utf-8").read())
+            if not ok:
+                print(f"  ✗ Cron script 安全校验未过：{reason}")
+                return
+            import subprocess
+            subprocess.run([sys.executable, script_path], cwd=BASE_DIR, timeout=300,
+                           capture_output=True, text=True)
+            print(f"  ✓ Cron script 任务完成：{script_path}")
+        except Exception as exc:
+            print(f"  ✗ Cron script 任务异常：{exc}")
+        return
+
+    # 未知 kind → fail-closed（记日志，不盲执行）
+    print(f"  ✗ Cron 任务 payload 未知，已 fail-closed：{p}")
 
 
 def _schedule_pump() -> None:

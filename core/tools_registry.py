@@ -12,11 +12,12 @@ from . import db
 _REGISTRY = {}  # name -> {name, description, schema, toolset, handler}
 
 
-def tool(name, description, schema=None, toolset="builtin"):
+def tool(name, description, schema=None, toolset="builtin", requires_approval=False):
     def deco(fn):
         _REGISTRY[name] = {
             "name": name, "description": description,
             "schema": schema or {}, "toolset": toolset, "handler": fn,
+            "requires_approval": requires_approval,
         }
         return fn
     return deco
@@ -222,11 +223,54 @@ def call_tool(name, args=None, tenant_id=None):
     spec = _REGISTRY.get(name)
     if not spec:
         return {"error": f"未知工具：{name}"}
+    # 执行层安全兜底（Hermes 十一·hardline block / path security）：
+    # 任何字符串参数若命中不可恢复命令黑名单，直接 fail-closed 拦截，
+    # 不走审批、不依赖提示词约束。覆盖 agent_loop 与 api.py 两条执行路径。
+    try:
+        from . import security
+        for v in (args or {}).values():
+            if isinstance(v, str) and security.hardline_block(v):
+                return {"error": "执行被安全层拦截：命中不可恢复命令黑名单（hardline block）"}
+    except Exception:
+        pass
     try:
         res = spec["handler"](tenant_id=tenant_id, **(args or {}))
         return {"name": name, "toolset": spec["toolset"], "result": res}
     except Exception as e:
         return {"error": str(e)}
+
+
+def run_tool_governed(name, args=None, tenant_id=None, session_id=None):
+    """治理版工具调用（对应 Hermes 三·工具治理管线 + 十一·审批门）。
+
+    顺序：未知工具 → 安全兜底(hardline) → 审批门(requires_approval / 命门工具) → 执行。
+    命中审批门时不执行，返回 {status:'pending', approval_id} 由上层挂起等待 HITL 决策；
+    否则等价于 call_tool，行为对现有内置工具完全不变（它们均未标记 requires_approval）。
+    """
+    spec = _REGISTRY.get(name)
+    if not spec:
+        return {"error": f"未知工具：{name}"}
+    # 安全兜底先行
+    try:
+        from . import security
+        for v in (args or {}).values():
+            if isinstance(v, str) and security.hardline_block(v):
+                return {"error": "执行被安全层拦截：命中不可恢复命令黑名单（hardline block）"}
+    except Exception:
+        pass
+    # 审批门：工具自身标记 或 落入命门/风险集合
+    try:
+        from . import approval
+        if spec.get("requires_approval") or approval.needs_approval(name):
+            aid = approval.create(
+                tenant_id or "default", name,
+                args_json=json.dumps(args or {}, ensure_ascii=False),
+                requested_by=session_id or "", risk="high",
+            )
+            return {"status": "pending", "approval_id": aid, "tool_name": name}
+    except Exception:
+        pass
+    return call_tool(name, args, tenant_id=tenant_id)
 
 
 def list_tools() -> list:

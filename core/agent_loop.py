@@ -15,10 +15,16 @@ from . import config, gateway, rag, tools_registry
 MAX_LOOPS = 6
 
 
-def _to_openai_tools() -> list:
-    """把工具注册表转换为 OpenAI function calling 工具声明。"""
+def _to_openai_tools(allowed_toolsets=None) -> list:
+    """把工具注册表转换为 OpenAI function calling 工具声明。
+
+    allowed_toolsets: None（默认）全量暴露，向后兼容；否则仅暴露 toolset
+    落在允许集合内的工具（Hermes 三·按 toolset 过滤：不同入口/租户只给必要能力，
+    既降风险也省上下文体积）。"""
     tools = []
     for t in tools_registry.list_tools():
+        if allowed_toolsets is not None and t.get("toolset") not in allowed_toolsets:
+            continue
         params = t.get("schema") or {}
         if not isinstance(params, dict):
             params = {}
@@ -47,11 +53,14 @@ def run(system: str, user_prompt: str, history: list | None = None,
         content = (h.get("content") if isinstance(h, dict) else "") or ""
         if role in ("user", "assistant") and content:
             messages.append({"role": role, "content": content[:rag.MAX_HISTORY_CHARS]})
-    # 服务端长期记忆注入（T3）：作为一条 system 级的上下文消息放在用户提问前
+    # 用户提问（本轮主体）
+    user_msg = user_prompt
+    # 服务端长期记忆注入（T3）：Hermes 四·临时/可变上下文应注入 user message 段，
+    # 而非塞进 system prompt——避免冲刷稳定前缀、破坏 prompt cache，并杜绝双 system 隐患。
     if memories:
         mem_text = "\n".join(f"- {m}" for m in memories[:8])
-        messages.append({"role": "system", "content": "【长期记忆·历史对话摘要】\n" + mem_text})
-    messages.append({"role": "user", "content": user_prompt})
+        user_msg = (user_prompt + "\n\n【长期记忆·历史对话摘要】\n" + mem_text)
+    messages.append({"role": "user", "content": user_msg})
 
     final_text = ""
     used_tools: list = []
@@ -80,7 +89,7 @@ def run(system: str, user_prompt: str, history: list | None = None,
 
         for tc in tool_calls:
             name, args = tc["name"], (tc["arguments"] or {})
-            r = tools_registry.call_tool(name, args, tenant_id=tenant_id)
+            r = tools_registry.run_tool_governed(name, args, tenant_id=tenant_id, session_id=None)
             if "result" in r:
                 out = str(r["result"])
             elif "content" in r:
