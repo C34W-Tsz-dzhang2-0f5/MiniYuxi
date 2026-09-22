@@ -2,6 +2,19 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/) 约定，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.2.1] - 2026-09-22
+
+### Changed
+- **O6 冷启动优化**：`core/db.py` 的 `sqlite_vec` 由顶层 import 改为 `connect()` 内延迟导入（会连带拖入 numpy）。
+  `import api` 冷启动 **3309ms → 2349ms（约 -29%）**；`import core.db` 仅 33ms 且不再加载 numpy；向量功能不变（`vec_version()` 仍 v0.1.9）。
+
+### Added
+- **O7 工具调用审计留痕**：`run_tool_governed` 补齐安全分层最后一环（Hermes 原则⑪ audit），
+  `success / rejected / blocked / pending / error` 五类结果全部写入 `soc_audit` 哈希链；审计失败静默降级，不阻断主流程。
+- **O8 联网工具可选审批**：`web_search` 支持 `MINIYUXI_APPROVE_WEB_SEARCH=1` 开启 HITL 审批门
+  （默认关闭，行为完全不变），用于管控对外查询内容与出口流量。
+- `tests/test_kernel_optimizations.py`（8 passed）。
+
 ## [0.2.0] - 2026-09-22
 
 ### Added

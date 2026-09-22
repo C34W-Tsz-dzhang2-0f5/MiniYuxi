@@ -66,8 +66,17 @@ def _count(tenant_id=None, **_):
 
 
 # ---------------- 联网搜索（T2 真实搜索，零依赖）----------------
+# 联网类工具的可选审批门：默认关闭（保持 Agent 自动化流畅）。
+# 设 MINIYUXI_APPROVE_WEB_SEARCH=1 后，web_search 每次调用都挂起 HITL 审批卡，
+# 用于需要管控「对外查询内容/出口流量」的企业场景。
+_WEB_SEARCH_APPROVAL = os.getenv("MINIYUXI_APPROVE_WEB_SEARCH", "").strip().lower() in (
+    "1", "true", "yes", "on",
+)
+
+
 @tool("web_search", "联网搜索实时信息（新闻 / 天气 / 百科 / 最新动态等）。参数 query 为搜索关键词。",
-      {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}, "builtin")
+      {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+      "builtin", requires_approval=_WEB_SEARCH_APPROVAL)
 def _web_search(query, tenant_id=None, **_):
     """零依赖真实联网搜索：标准库 urllib 直连，无需额外 Key。
     优先级：① 企业搜索后端(WEB_SEARCH_API_URL+KEY) → ② Bing(cn/www，国内可达) → ③ DuckDuckGo(兜底) → 友好降级。
@@ -254,21 +263,52 @@ def call_tool(name, args=None, tenant_id=None):
         return {"error": str(e)}
 
 
+def _audit_tool_event(tool_name: str, result: str, severity: str = "info",
+                      tenant_id=None, session_id=None, detail=None) -> None:
+    """工具调用审计留痕 —— 安全分层的最后一环（Hermes 原则⑪：audit）。
+
+    hardline 拦截 / 审批 / 路径校验 已在 B-1、B-5 落地，这里补齐审计，
+    使每次工具调用（含被拒绝、被拦截、被挂起）都可追溯。
+
+    审计失败静默降级：审计不可用不应阻断工具执行主流程。
+    """
+    try:
+        from . import soc_audit
+
+        soc_audit.log({
+            "tenant_id": tenant_id or "default",
+            "actor": session_id or "agent",
+            "role": "agent",
+            "action": "tool.call",
+            "target": tool_name,
+            "result": result,
+            "severity": severity,
+            "session_id": session_id or "",
+            "detail": detail or {},
+        })
+    except Exception:
+        pass
+
+
 def run_tool_governed(name, args=None, tenant_id=None, session_id=None):
     """治理版工具调用（对应 Hermes 三·工具治理管线 + 十一·审批门）。
 
     顺序：未知工具 → 安全兜底(hardline) → 审批门(requires_approval / 命门工具) → 执行。
-    命中审批门时不执行，返回 {status:'pending', approval_id} 由上层挂起等待 HITL 决策；
-    否则等价于 call_tool，行为对现有内置工具完全不变（它们均未标记 requires_approval）。
+    每个出口都写审计留痕（result: rejected / blocked / pending / success / error）。
+    命中审批门时不执行，返回 {status:'pending', approval_id} 由上层挂起等待 HITL 决策。
     """
     spec = _REGISTRY.get(name)
     if not spec:
+        _audit_tool_event(name, "rejected", "warn", tenant_id, session_id,
+                          {"reason": "unknown tool"})
         return {"error": f"未知工具：{name}"}
     # 安全兜底先行
     try:
         from . import security
         for v in (args or {}).values():
             if isinstance(v, str) and security.hardline_block(v):
+                _audit_tool_event(name, "blocked", "critical", tenant_id, session_id,
+                                  {"reason": "hardline block", "args": str(args)[:500]})
                 return {"error": "执行被安全层拦截：命中不可恢复命令黑名单（hardline block）"}
     except Exception:
         pass
@@ -281,10 +321,23 @@ def run_tool_governed(name, args=None, tenant_id=None, session_id=None):
                 args_json=json.dumps(args or {}, ensure_ascii=False),
                 requested_by=session_id or "", risk="high",
             )
+            _audit_tool_event(name, "pending", "warn", tenant_id, session_id,
+                              {"approval_id": aid})
             return {"status": "pending", "approval_id": aid, "tool_name": name}
     except Exception:
         pass
-    return call_tool(name, args, tenant_id=tenant_id)
+    # 执行并审计结果
+    try:
+        res = call_tool(name, args, tenant_id=tenant_id)
+    except Exception as exc:  # noqa: BLE001
+        _audit_tool_event(name, "error", "error", tenant_id, session_id,
+                          {"error": str(exc)[:300]})
+        raise
+    failed = isinstance(res, dict) and bool(res.get("error"))
+    _audit_tool_event(name, "error" if failed else "success",
+                      "error" if failed else "info", tenant_id, session_id,
+                      {"args": str(args)[:500]})
+    return res
 
 
 # MCP 工具发现结果缓存：避免每次 /api/tools/list（UI 加载必调）都做外部网络探测。
