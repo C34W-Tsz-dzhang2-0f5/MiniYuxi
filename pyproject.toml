@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "miniyuxi"
+version = "0.2.0"
+description = "MiniYuxi · 企业级 AI 助手（三端统一 · 本地优先 · 零 Docker）"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "MiniYuxi contributors" }]
+keywords = ["agent", "rag", "llm", "hr", "local-first", "cli"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = []
+
+[project.optional-dependencies]
+web = ["fastapi", "uvicorn", "requests"]
+dev = ["pytest"]
+
+[project.scripts]
+miniyuxi = "cli:main"
+
+[project.urls]
+Homepage = "https://github.com/C34W-Tsz-dzhang2-0f5/MiniYuxi"
+Repository = "https://github.com/C34W-Tsz-dzhang2-0f5/MiniYuxi"
+Issues = "https://github.com/C34W-Tsz-dzhang2-0f5/MiniYuxi/issues"
+
+[tool.setuptools]
+# 显式声明，避免自动发现把 data/ web/ 等整包带进来
+py-modules = ["cli"]
+packages = ["core"]

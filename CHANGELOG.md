@@ -2,6 +2,22 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/) 约定，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.2.0] - 2026-09-22
+
+### Added
+- **CLI 端（P2）落地**：`cli.py` 薄客户端，直接 `import core` 复用内核（不经 HTTP）。
+  - `chat` 交互式对话（`/exit` `/new` `/ctx`）、`ask` 单次问答（`--json`）、`doctor` 环境体检（`--full` 复用 `tests/selftest.py`）、`kb list|search|add`、`tools`、`skills`、`serve`。
+  - **延迟导入内核**：`--help` / `version` 不触发冷启动（~0.4s vs 2.4s）。
+  - Windows 启动器 `miniyuxi.bat`；`pyproject.toml` 提供 `miniyuxi` console script（`pip install -e .`）。
+- `tests/test_cli.py`（8 passed），含「help 路径不得导入 core」的延迟导入守护测试。
+
+### Changed
+- `doctor` 中 LLM 凭证缺失由 FAIL 降级为 **WARN**（项目有离线兜底，不影响可用性）。
+
+### Planned (路线图)
+- Desktop 端（Tauri sidecar 复用内核）。
+- 文档站（VitePress 在线阅读）。
+
 ## [0.1.0] - 2026-09-22
 
 ### Added

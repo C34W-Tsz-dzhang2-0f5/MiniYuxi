@@ -39,9 +39,20 @@ python tests/selftest.py                            # 期望 20/20
 
 Tauri 外壳加载同一 SPA，Python 内核以 sidecar 常驻本地；详见 [`docs/三端统一架构与开源增长方案.md`](docs/三端统一架构与开源增长方案.md) 第 3 节。
 
-### ⌨️ CLI 端（路线图中）
+### ⌨️ CLI 端（已可用 · 薄客户端）
 
-`miniyuxi chat "..."` 直接 `import core` 或连同一 REST 契约；`miniyuxi doctor` 复用自检。
+CLI 直接 `import core`（不经 HTTP，零网络开销），与 Web 共享同一内核：
+
+```bash
+python cli.py doctor                 # 环境体检（--full 跑完整自检）
+python cli.py ask "劳动合同到期预警？"  # 单次问答
+python cli.py chat                   # 交互式对话（/exit 退出，/new 清空上下文）
+python cli.py kb list|search|add     # 知识库
+python cli.py tools | skills         # 工具 / 技能清单
+python cli.py serve                  # 顺手拉起 Web 服务
+```
+
+Windows 可直接双击 `miniyuxi.bat`；或 `pip install -e .` 后全局使用 `miniyuxi` 命令。
 
 ## 🏗️ 架构
 
