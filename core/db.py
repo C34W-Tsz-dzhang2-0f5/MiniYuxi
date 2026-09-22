@@ -29,8 +29,16 @@ def connect() -> sqlite3.Connection:
     if conn is None:
         conn = sqlite3.connect(config.DB_PATH, check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        # ---- 并发与性能调优（SQLite 单文件多进程安全的关键）----
+        # WAL：读写并发，读不阻塞写；synchronous=NORMAL：WAL 下仍崩溃一致且写入更快；
+        # busy_timeout：写冲突时等待而非立即报 database is locked（多进程/多写者场景必备）；
+        # cache_size=-16MB / temp_store=MEMORY：放大页缓存，显著降低重复查询 I/O。
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA cache_size=-16000")
+        conn.execute("PRAGMA temp_store=MEMORY")
         conn.enable_load_extension(True)
         sqlite_vec.load(conn)
         conn.enable_load_extension(False)

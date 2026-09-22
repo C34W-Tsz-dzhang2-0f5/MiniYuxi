@@ -7,6 +7,7 @@ import ast
 import datetime
 import json
 import os
+import time
 from . import db
 
 _REGISTRY = {}  # name -> {name, description, schema, toolset, handler}
@@ -169,10 +170,20 @@ def _web_search(query, tenant_id=None, **_):
     return {"result": "（当前环境无法联网检索，可能受网络出口限制。可配置 WEB_SEARCH_API_URL+WEB_SEARCH_API_KEY 走企业搜索后端。）"}
 
 
+# health 后端探测缓存：/api/health 是热端点，避免每次真实网络探测（超时可达 4s）。
+_SB_STATUS_TTL = 30.0
+_sb_status_cache = {"ts": 0.0, "val": None}
+
+
 def search_backend_status():
     """返回当前 web_search 的默认/生效后端信息，供 /api/health 前端展示。
 
-    真实探测豆包(火山引擎)是否可达，让“已激活为默认搜索”可被一眼确认。"""
+    真实探测豆包(火山引擎)是否可达，让“已激活为默认搜索”可被一眼确认。
+    结果带 TTL 缓存（默认 30s），避免每次 /api/health 都发起阻塞式网络探测。"""
+    global _sb_status_cache
+    now = time.time()
+    if _sb_status_cache["val"] is not None and now - _sb_status_cache["ts"] < _SB_STATUS_TTL:
+        return _sb_status_cache["val"]
     backend = (os.getenv("SEARCH_BACKEND", "doubao") or "doubao").lower()
     ent_url = os.getenv("WEB_SEARCH_API_URL", "").strip()
     ent_key = os.getenv("WEB_SEARCH_API_KEY", "").strip()
@@ -199,13 +210,16 @@ def search_backend_status():
     labels = {"doubao": "豆包/火山引擎", "bing": "Bing", "duckduckgo": "DuckDuckGo"}
     chain = (["doubao", "bing", "duckduckgo"] if backend == "doubao"
              else [backend, "duckduckgo"] if backend == "bing" else [backend])
-    return {
+    result = {
         "default": backend,
         "default_label": labels.get(backend, backend),
         "enterprise_configured": configured,
         "enterprise_reachable": reachable,
         "fallback_chain": chain,
     }
+    _sb_status_cache["val"] = result
+    _sb_status_cache["ts"] = now
+    return result
 
 
 # ---------------- 注册表操作 ----------------
@@ -273,12 +287,21 @@ def run_tool_governed(name, args=None, tenant_id=None, session_id=None):
     return call_tool(name, args, tenant_id=tenant_id)
 
 
+# MCP 工具发现结果缓存：避免每次 /api/tools/list（UI 加载必调）都做外部网络探测。
+_MCP_DISCOVER_TTL = 60.0
+_mcp_discover_cache = {"ts": 0.0, "val": []}
+
+
 def list_tools() -> list:
     base = [{"name": v["name"], "description": v["description"], "schema": v["schema"], "toolset": v["toolset"]}
             for v in _REGISTRY.values()]
     try:
         from . import mcp_client
-        base += mcp_client.discover_tools()
+        now = time.time()
+        if now - _mcp_discover_cache["ts"] > _MCP_DISCOVER_TTL:
+            _mcp_discover_cache["val"] = mcp_client.discover_tools()
+            _mcp_discover_cache["ts"] = now
+        base += _mcp_discover_cache["val"]
     except Exception:
         pass
     return base

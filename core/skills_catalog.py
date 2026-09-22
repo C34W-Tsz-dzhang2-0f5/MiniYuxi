@@ -66,9 +66,26 @@ def _scan() -> list:
     return out
 
 
+# 目录级缓存：skills/ 目录 mtime 不变则直接返回上次扫描结果，
+# 避免每次 /api/skills/list（UI 高频调用）都做递归 glob 扫描文件系统。
+_skills_cache = {"mtime": 0.0, "val": None}
+
+
 def list_skills() -> list:
-    """列出全部已注册技能（dict 列表）。无任何技能时返回 []，不报错。"""
-    return _scan()
+    """列出全部已注册技能（dict 列表）。无任何技能时返回 []，不报错。
+
+    按 skills/ 目录 mtime 做缓存：目录未变动时跳过 glob 递归扫描。
+    """
+    try:
+        mtime = os.path.getmtime(SKILLS_DIR) if os.path.isdir(SKILLS_DIR) else 0.0
+    except OSError:
+        mtime = 0.0
+    if _skills_cache["val"] is not None and _skills_cache["mtime"] == mtime:
+        return _skills_cache["val"]
+    val = _scan()
+    _skills_cache["mtime"] = mtime
+    _skills_cache["val"] = val
+    return val
 
 
 def load_skill(name: str):

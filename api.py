@@ -1600,12 +1600,26 @@ def hrm_flow_submit(form_key: str, rid: str, p: auth.Principal = Depends(need("h
 _NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
 
 
+# 首页渲染缓存：文件 mtime 不变则复用上次渲染结果（图标 JSON 本身已缓存），
+# 避免每个 GET / 都重读并字符串替换 index.html。
+_INDEX_CACHE = {"mtime": 0.0, "html": None}
+
+
 @app.get("/")
 def index():
     """主界面 = MiniYuxi 智能工作台（外观同 /wb 复刻，字样已改 MiniYuxi）。
     注入快捷入口图标 JSON（__ICONS_JSON__ 占位符）。"""
-    html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(html.replace("__ICONS_JSON__", _wb_icons_json()), headers=_NO_CACHE)
+    global _INDEX_CACHE
+    p = WEB_DIR / "index.html"
+    try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    if _INDEX_CACHE["html"] is None or _INDEX_CACHE["mtime"] != mtime:
+        html = p.read_text(encoding="utf-8").replace("__ICONS_JSON__", _wb_icons_json())
+        _INDEX_CACHE["html"] = html
+        _INDEX_CACHE["mtime"] = mtime
+    return HTMLResponse(_INDEX_CACHE["html"], headers=_NO_CACHE)
 
 
 # V1：旧版多模块入口统一收敛到 MiniYuxi 主界面
