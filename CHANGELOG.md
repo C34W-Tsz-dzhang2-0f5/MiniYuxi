@@ -2,6 +2,25 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/) 约定，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### Added
+- **`scripts/verify.py`：一键质量闸门**（本地与 CI 同构）。
+  §6 里点名的入口此前只有 bash 版 `scripts/verify-precommit.sh`，Windows 跑不顺；现在一条命令
+  `python scripts/verify.py` 复现 CI 的全部卡点，支持 `--quick`（只跑纯 stdlib）/ `--json`（机器可读）。
+- CI 新增 **Desktop sidecar 单元测试**步骤（`--unit-only`）。此前 P3 新增的 `tests/test_desktop_sidecar.py`
+  没进 CI 是个缺口；端到端 tour 依赖 PyInstaller 产物（Windows 专属），故只挂跨平台确定的单元部分。
+
+### Fixed
+- `CHANGELOG.md` 0.2.2 条目把 Tauri `externalBin` 命名写成 `<HOST_TRIPLE>-miniyuxi-sidecar`（**写反**），
+  与实现（`miniyuxi-sidecar-<triple>`，triple 作后缀）不符。文档写反比代码写错更坑人，已校准。
+- `scripts/build_sidecar.py::host_target_triple` docstring 同样写成"前缀"，改为"后缀"。
+
+### Changed
+- `docs/三端统一架构与开源增长方案.md`：§6「发布前」三项打 ✅；§8 交付物清单去掉
+  「README（待升级）」「.github（待建）」等过时标记，补 `README.md` / `readme_hero.png` /
+  `.github` / `scripts/verify.py` 已交付行，并写明 P4 剩余为「发布日/持续」对外动作。
+
 ## [0.2.2] - 2026-09-22
 
 ### Added
@@ -11,7 +30,7 @@
   - `core/config.DATA_DIR` 受 `MINIYUXI_DATA_DIR` 控制；`run.py::_frozen_bootstrap` 在 PyInstaller 冻结时自动落 `%LOCALAPPDATA%/MiniYuxi/data`，避免 BASE_DIR 变 `_MEIPASS` 临时路径。
   - `cli.py serve --sidecar`（透传给 run.py）。
   - `apps/desktop/`：Tauri 外壳（`src/` 启动壳 + `src-tauri/` 主进程 4 依赖）、`withGlobalTauri` 走 `window.__TAURI__`、权限收口 `shell:allow-execute` 只允许自己的 sidecar；图标用 Pillow 现成生成（含 macOS `.icns`）。
-  - `scripts/build_sidecar.py`：PyInstaller 打 `<HOST_TRIPLE>-miniyuxi-sidecar` 到 `apps/desktop/src-tauri/binaries/`（Tauri externalBin 格式）。
+  - `scripts/build_sidecar.py`：PyInstaller 打 `miniyuxi-sidecar-<target triple>` 到 `apps/desktop/src-tauri/binaries/`（Tauri externalBin 格式，triple 是**后缀**）。
   - `examples/desktop_tour/code.py`：离线贯通演示（拉起 sidecar → READY → health → me → chat → tools → 优雅关闭）**7/7 通过**。
   - `tests/test_desktop_sidecar.py`：**2/2 通过**（单元 ttl 生效 + 端到端 tour）。
   - `docs/desktop.md` + `apps/desktop/README.md`：通信契约、三条跑通路径、风险与验收清单。

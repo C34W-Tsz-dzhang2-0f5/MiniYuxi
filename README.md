@@ -90,7 +90,14 @@ Web / Desktop / CLI  ──┐
 - `tests/selftest.py`：**20/20** 端到端通过
 - `tests/test_hermes_landing.py`：13 passed（Hermes 原则落地）
 - `tests/test_perf_optimizations.py`：5 passed（性能优化回归）
-- 提交/PR 经 `.github/workflows/verify.yml` 卡点（未定义符号扫描 + 法条闸门）
+- 提交/PR 经 `.github/workflows/verify.yml` 卡点（未定义符号扫描 + 法条闸门 + 桌面端单元）
+
+一条命令复现 CI 全部门禁（Windows 也能跑，不用等 push 才发现红）：
+
+```bash
+python scripts/verify.py           # 全量，等价 CI
+python scripts/verify.py --quick    # 只跑纯 stdlib 快卡点（约 2.5s）
+```
 
 ## 🔒 部署与安全红线
 
@@ -107,7 +114,7 @@ Web / Desktop / CLI  ──┐
 欢迎 Issue / PR！详见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。提交前请跑：
 
 ```bash
-python tests/selftest.py && python tests/test_hermes_landing.py && python tests/test_perf_optimizations.py
+python scripts/verify.py
 ```
 
 ## 📄 协议

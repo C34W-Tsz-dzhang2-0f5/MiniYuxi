@@ -55,7 +55,7 @@ EXTRA_HIDDENIMPORTS = [
 
 
 def host_target_triple() -> str:
-    """当前主机的 Rust target triple（用于给产物加前缀以便 Tauri 按平台打包）。"""
+    """当前主机的 Rust target triple（作为产物**后缀**，供 Tauri 按平台打包识别）。"""
     s = platform.system().lower()
     m = platform.machine().lower()
     if s == "windows":

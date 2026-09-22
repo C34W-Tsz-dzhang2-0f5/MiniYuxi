@@ -30,6 +30,10 @@ jobs:
       - name: Citation gate unit test (legal/labor no-fabrication)
         run: python tests/_verify_citation_gate.py
 
+      # 桌面端 sidecar 只跑单元：端到端 tour 依赖 PyInstaller 产物（Windows 专属），放 Linux CI 会假红
+      - name: Desktop sidecar unit test (token ttl)
+        run: python tests/test_desktop_sidecar.py --unit-only
+
       - name: Route smoke test (frontend acceptance)
         run: python tests/_smoke_routes.py
 
