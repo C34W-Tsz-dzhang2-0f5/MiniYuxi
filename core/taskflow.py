@@ -47,9 +47,20 @@ def _load():
         return json.load(f)
 
 
+ROLE_DISPLAY = {
+    "admin_office": "行政",
+    "hr": "人事",
+}
+
+
+def role_display(role: str) -> str:
+    return ROLE_DISPLAY.get(role) or (role or "").replace("_", " ").title() or "未命名岗位"
+
+
 def list_roles() -> list:
     d = _load()
-    return [{"role": r, "role_line": m.get("role_line", ""), "count": m.get("count", 0)}
+    return [{"role": r, "role_line": m.get("role_line", ""), "count": m.get("count", 0),
+             "display": role_display(r)}
             for r, m in d.get("roles", {}).items()]
 
 

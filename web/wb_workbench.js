@@ -238,40 +238,39 @@
   /* ---------------- 岗位工作台：提示词解析 → 自动执行闭环 ---------------- */
   function openTaskFlowModal() {
     var body =
-      '<div id="tfRoles" class="fm-empty">加载岗位中…</div>' +
-      '<div id="tfTasks"></div>' +
+      '<div id="tfRoles" class="fm-empty">加载任务目录中…</div>' +
       '<div id="tfRun" style="margin-top:12px"></div>';
     openFeatureModal('岗位工作台（提示词 → 自动执行）', body,
       '<button class="fm-btn secondary" id="tfClose">关闭</button>');
     $('#tfClose').addEventListener('click', closeFeatureModal);
-    loadTaskFlowRoles();
+    loadTaskFlowAll();
   }
 
-  function loadTaskFlowRoles() {
-    wbFetch('/api/taskflow/roles').then(function (r) { return r.json(); }).then(function (d) {
-      var roles = d.roles || [];
-      $('#tfRoles').innerHTML = '<div class="fm-row">' + roles.map(function (r) {
-        return '<button class="fm-btn" data-role="' + r.role + '">' + r.display + '（' + r.count + ' 任务）</button>';
-      }).join('') + '</div>';
-      $$('#tfRoles .fm-btn').forEach(function (b) {
-        b.addEventListener('click', function () { loadTaskFlowTasks(b.dataset.role); });
-      });
-    }).catch(function (e) { $('#tfRoles').textContent = '加载失败：' + e; });
-  }
-
-  function loadTaskFlowTasks(role) {
-    $('#tfTasks').innerHTML = '<div class="fm-empty">加载任务目录…</div>';
-    wbFetch('/api/taskflow/list?role=' + encodeURIComponent(role)).then(function (r) { return r.json(); }).then(function (d) {
-      var tasks = d.tasks || [];
-      $('#tfTasks').innerHTML = '<div class="fm-grid">' + tasks.map(function (t) {
-        return '<div class="fm-card" data-id="' + t.id + '"><div class="n">' + t.title + '</div>' +
-               '<div class="m">' + t.module + '</div>' +
-               '<button class="fm-btn sm" data-run="' + t.id + '">运行</button></div>';
-      }).join('') + '</div>';
-      $$('#tfTasks .fm-card [data-run]').forEach(function (b) {
+  // 一次性加载全部任务，按岗位分组直出，点「运行」即执行（免去先选岗位再选任务）
+  function loadTaskFlowAll() {
+    Promise.all([
+      wbFetch('/api/taskflow/roles').then(function (r) { return r.json(); }),
+      wbFetch('/api/taskflow/list').then(function (r) { return r.json(); })
+    ]).then(function (rs) {
+      var nameMap = {};
+      (rs[0].roles || []).forEach(function (r) { nameMap[r.role] = r.display || r.role_line || r.role; });
+      var tasks = rs[1].tasks || [];
+      if (!tasks.length) { $('#tfRoles').textContent = '任务库为空'; return; }
+      var byRole = {};
+      tasks.forEach(function (t) { (byRole[t.role] = byRole[t.role] || []).push(t); });
+      $('#tfRoles').innerHTML = Object.keys(byRole).map(function (role) {
+        var cards = byRole[role].map(function (t) {
+          return '<div class="fm-card" data-id="' + t.id + '"><div class="n">' + t.title + '</div>' +
+                 '<div class="m">' + t.module + '</div>' +
+                 '<button class="fm-btn sm" data-run="' + t.id + '">运行</button></div>';
+        }).join('');
+        return '<div class="fm-sub" style="margin:10px 0 6px"><b>' + (nameMap[role] || role) +
+               '（' + byRole[role].length + ' 任务）</b></div><div class="fm-grid">' + cards + '</div>';
+      }).join('');
+      $$('#tfRoles .fm-card [data-run]').forEach(function (b) {
         b.addEventListener('click', function (e) { e.stopPropagation(); openTaskFlowRun(b.dataset.run); });
       });
-    }).catch(function (e) { $('#tfTasks').textContent = '加载失败：' + e; });
+    }).catch(function (e) { $('#tfRoles').textContent = '加载失败：' + e; });
   }
 
   function openTaskFlowRun(taskId) {
