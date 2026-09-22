@@ -235,47 +235,89 @@
     }
   }
 
-  /* ---------------- 岗位工作台：提示词解析 → 自动执行闭环 ---------------- */
+  /* ---------------- 岗位工作台：左列表（页签+搜索）右运行双栏 ---------------- */
+  var TF_STATE = { tasks: [], names: {}, role: 'all' };
+
   function openTaskFlowModal() {
     var body =
-      '<div id="tfRoles" class="fm-empty">加载任务目录中…</div>' +
-      '<div id="tfRun" style="margin-top:12px"></div>';
+      '<div class="tf-wrap">' +
+        '<div class="tf-left">' +
+          '<div class="tf-bar">' +
+            '<div id="tfTabs"></div>' +
+            '<input class="tf-search" id="tfQ" placeholder="搜索任务名 / 模块…">' +
+          '</div>' +
+          '<div class="tf-list" id="tfList"><div class="fm-empty">加载任务目录中…</div></div>' +
+        '</div>' +
+        '<div class="tf-right" id="tfRun"><div class="tf-hint">点左侧任务卡的「运行」开始<br>表单和结果都显示在这一栏</div></div>' +
+      '</div>';
     openFeatureModal('岗位工作台（提示词 → 自动执行）', body,
-      '<button class="fm-btn secondary" id="tfClose">关闭</button>');
+      '<button class="fm-btn secondary" id="tfClose">关闭</button>', { wide: true });
     $('#tfClose').addEventListener('click', closeFeatureModal);
+    TF_STATE = { tasks: [], names: {}, role: 'all' };
     loadTaskFlowAll();
   }
 
-  // 一次性加载全部任务，按岗位分组直出，点「运行」即执行（免去先选岗位再选任务）
+  // 一次性加载全部任务；页签切换岗位、搜索框过滤，点运行在右侧面板操作
   function loadTaskFlowAll() {
     Promise.all([
       wbFetch('/api/taskflow/roles').then(function (r) { return r.json(); }),
       wbFetch('/api/taskflow/list').then(function (r) { return r.json(); })
     ]).then(function (rs) {
-      var nameMap = {};
-      (rs[0].roles || []).forEach(function (r) { nameMap[r.role] = r.display || r.role_line || r.role; });
-      var tasks = rs[1].tasks || [];
-      if (!tasks.length) { $('#tfRoles').textContent = '任务库为空'; return; }
-      var byRole = {};
-      tasks.forEach(function (t) { (byRole[t.role] = byRole[t.role] || []).push(t); });
-      $('#tfRoles').innerHTML = Object.keys(byRole).map(function (role) {
-        var cards = byRole[role].map(function (t) {
-          return '<div class="fm-card" data-id="' + t.id + '"><div class="n">' + t.title + '</div>' +
-                 '<div class="m">' + t.module + '</div>' +
-                 '<button class="fm-btn sm" data-run="' + t.id + '">运行</button></div>';
-        }).join('');
-        return '<div class="fm-sub" style="margin:10px 0 6px"><b>' + (nameMap[role] || role) +
-               '（' + byRole[role].length + ' 任务）</b></div><div class="fm-grid">' + cards + '</div>';
+      (rs[0].roles || []).forEach(function (r) { TF_STATE.names[r.role] = r.display || r.role_line || r.role; });
+      TF_STATE.tasks = rs[1].tasks || [];
+      if (!TF_STATE.tasks.length) { $('#tfList').innerHTML = '<div class="fm-empty">任务库为空</div>'; return; }
+      $('#tfTabs').innerHTML = ['all'].concat(Object.keys(TF_STATE.names)).map(function (r) {
+        var label = r === 'all' ? '全部' : (TF_STATE.names[r] || r);
+        var n = r === 'all' ? TF_STATE.tasks.length : TF_STATE.tasks.filter(function (t) { return t.role === r; }).length;
+        return '<button class="tf-tab' + (r === TF_STATE.role ? ' on' : '') + '" data-role="' + r + '">' + label + ' ' + n + '</button>';
       }).join('');
-      $$('#tfRoles .fm-card [data-run]').forEach(function (b) {
-        b.addEventListener('click', function (e) { e.stopPropagation(); openTaskFlowRun(b.dataset.run); });
+      $$('#tfTabs .tf-tab').forEach(function (b) {
+        b.addEventListener('click', function () {
+          TF_STATE.role = b.dataset.role;
+          $$('#tfTabs .tf-tab').forEach(function (x) { x.classList.toggle('on', x === b); });
+          renderTaskFlowList();
+        });
       });
-    }).catch(function (e) { $('#tfRoles').textContent = '加载失败：' + e; });
+      $('#tfQ').addEventListener('input', renderTaskFlowList);
+      renderTaskFlowList();
+    }).catch(function (e) { $('#tfList').innerHTML = '<div class="fm-empty">加载失败：' + e + '</div>'; });
+  }
+
+  function renderTaskFlowList() {
+    var q = ($('#tfQ').value || '').trim().toLowerCase();
+    var ts = TF_STATE.tasks.filter(function (t) {
+      if (TF_STATE.role !== 'all' && t.role !== TF_STATE.role) return false;
+      if (q && (t.title + t.module + t.id).toLowerCase().indexOf(q) < 0) return false;
+      return true;
+    });
+    if (!ts.length) { $('#tfList').innerHTML = '<div class="fm-empty">没有匹配的任务</div>'; return; }
+    var groups = {};
+    ts.forEach(function (t) { (groups[t.role] = groups[t.role] || []).push(t); });
+    $('#tfList').innerHTML = Object.keys(groups).map(function (role) {
+      var cards = groups[role].map(function (t) {
+        return '<div class="fm-card" data-id="' + t.id + '"><div class="n">' + t.title + '</div>' +
+               '<div class="m">' + t.module + '</div>' +
+               '<button class="fm-btn sm" data-run="' + t.id + '">运行</button></div>';
+      }).join('');
+      var head = TF_STATE.role === 'all'
+        ? '<div class="fm-sub"><b>' + (TF_STATE.names[role] || role) + '（' + groups[role].length + '）</b></div>' : '';
+      return head + '<div class="fm-grid">' + cards + '</div>';
+    }).join('');
+    $$('#tfList .fm-card').forEach(function (c) {
+      c.addEventListener('click', function () { openTaskFlowRun(c.dataset.id); });
+    });
+    $$('#tfList .fm-card [data-run]').forEach(function (b) {
+      b.addEventListener('click', function (e) { e.stopPropagation(); openTaskFlowRun(b.dataset.run); });
+    });
   }
 
   function openTaskFlowRun(taskId) {
+    var t = null;
+    for (var i = 0; i < TF_STATE.tasks.length; i++) { if (TF_STATE.tasks[i].id === taskId) { t = TF_STATE.tasks[i]; break; } }
+    $$('#tfList .fm-card').forEach(function (c) { c.classList.toggle('on', c.dataset.id === taskId); });
     $('#tfRun').innerHTML =
-      '<div class="fm-sub">运行任务：<b>' + taskId + '</b></div>' +
+      '<div class="tf-run-title">' + (t ? t.title : taskId) + '</div>' +
+      '<div class="fm-sub">' + (t ? (TF_STATE.names[t.role] || t.role) + ' · ' + t.module : '') + '</div>' +
       '<div class="fm-form">' +
       '企业/部门<input id="tfDept" placeholder="车务通科技">' +
       '本次目标<input id="tfGoal" placeholder="如：发布中秋放假通知">' +
@@ -288,6 +330,7 @@
       '<button class="fm-btn secondary" id="tfDryBtn">试运行(不调LLM)</button>' +
       '</div>' +
       '<pre id="tfOut" class="fm-log">—</pre>';
+    $('#tfRun').scrollTop = 0;
     $('#tfRunBtn').addEventListener('click', function () { postTaskFlowRun(taskId, false); });
     $('#tfDryBtn').addEventListener('click', function () { postTaskFlowRun(taskId, true); });
   }

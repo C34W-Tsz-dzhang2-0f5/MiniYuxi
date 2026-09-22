@@ -69,6 +69,19 @@
   .fm-form input{width:100%;padding:8px 11px;border:1px solid #e2e2e2;border-radius:8px;font-size:14px;box-sizing:border-box}
   .fm-card .fm-btn.sm{padding:5px 12px;font-size:12px;margin-top:8px}
 
+  /* ---- 岗位工作台：左列表右运行双栏 ---- */
+  .tf-wrap{display:flex;gap:14px;align-items:stretch}
+  .tf-left{flex:1;min-width:0;display:flex;flex-direction:column}
+  .tf-right{width:340px;flex:0 0 340px;border-left:1px solid #eee;padding-left:14px;overflow-y:auto;max-height:62vh}
+  .tf-bar{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+  #tfTabs{display:flex;gap:6px;flex-wrap:wrap}
+  .tf-tab{padding:6px 14px;border:1px solid #e2e2e2;border-radius:999px;background:#fff;font-size:13px;cursor:pointer}
+  .tf-tab.on{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+  .tf-search{flex:1;min-width:140px;padding:7px 12px;border:1px solid #e2e2e2;border-radius:999px;font-size:13px}
+  .tf-list{overflow-y:auto;max-height:62vh;padding-right:4px}
+  .tf-hint{color:#999;font-size:13px;text-align:center;padding:32px 0;line-height:1.8}
+  .tf-run-title{font-size:14px;font-weight:700;margin-bottom:4px}
+
   /* ---- HRM 人事管理系统（简道云迁移）---- */
   .hrm-wrap{display:flex;gap:14px;min-height:420px}
   .hrm-side{width:230px;flex:none;border-right:1px solid #eee;padding-right:12px;display:flex;flex-direction:column;gap:8px}
