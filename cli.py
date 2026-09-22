@@ -304,6 +304,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
         cmd += ["--port", str(args.port)]
     if args.no_open:
         cmd.append("--no-open")
+    if getattr(args, "sidecar", False):
+        cmd.append("--sidecar")   # 桌面端 sidecar 常驻模式（READY 契约，供 Tauri 外壳拉起）
     print(f"启动 Web 服务：{' '.join(cmd)}")
     return os.execvp(sys.executable, cmd)  # noqa: PLW1510
 
@@ -383,6 +385,8 @@ def build_parser() -> argparse.ArgumentParser:
     sv = sub.add_parser("serve", help="启动 Web 服务")
     sv.add_argument("--port", type=int)
     sv.add_argument("--no-open", action="store_true")
+    sv.add_argument("--sidecar", action="store_true",
+                    help="桌面端 sidecar 常驻模式：强制回环 + 自动选端口 + READY 契约行")
     sv.set_defaults(func=cmd_serve)
 
     return p

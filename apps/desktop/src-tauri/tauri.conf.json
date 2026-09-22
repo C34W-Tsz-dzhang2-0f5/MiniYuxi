@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MiniYuxi",
+  "version": "0.2.0",
+  "identifier": "com.miniyuxi.desktop",
+  "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "",
+    "frontendDist": "../src"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "splash",
+        "title": "MiniYuxi · 正在启动内核",
+        "width": 560,
+        "height": 460,
+        "resizable": false,
+        "center": true,
+        "decorations": true,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": ["binaries/miniyuxi-sidecar"],
+    "resources": [],
+    "copyright": "Copyright © 2026 MiniYuxi contributors",
+    "category": "Productivity",
+    "shortDescription": "本地优先的企业级 AI 助手（三端统一）",
+    "longDescription": "MiniYuxi：内核（Agent Loop / RAG / 工具治理 / 审计）只写一次，Web / Desktop / CLI 三端共用。桌面端用 Tauri 外壳 + Python 内核 sidecar，数据全部留在本机。"
+  }
+}

@@ -34,10 +34,16 @@ def _b64u_dec(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
 
-def make_token(payload: dict) -> str:
+def make_token(payload: dict, ttl: int | None = None) -> str:
+    """签发自签 JWT。
+
+    ttl: 可选的自定义有效期（秒）。默认用 config.TOKEN_TTL（全局 12h）。
+    仅桌面 sidecar 的本地会话 token 会传长 TTL —— 该 token 只对回环监听的本进程有效，
+    不落盘到浏览器可访问之外的位置（data/sidecar.json，见 run.py --sidecar）。
+    """
     body = dict(payload)
     body["iat"] = int(time.time())
-    body["exp"] = int(time.time()) + config.TOKEN_TTL
+    body["exp"] = int(time.time()) + (config.TOKEN_TTL if ttl is None else int(ttl))
     head = {"alg": "HS256", "typ": "JWT"}
     h = _b64u(json.dumps(head, separators=(",", ":")).encode())
     p = _b64u(json.dumps(body, separators=(",", ":")).encode())

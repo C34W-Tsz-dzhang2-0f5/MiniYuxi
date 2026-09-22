@@ -1,0 +1,29 @@
+[package]
+name = "miniyuxi-desktop"
+version = "0.2.0"
+description = "MiniYuxi 桌面端外壳：Tauri 窗口 + Python 内核作 sidecar 常驻"
+authors = ["MiniYuxi contributors"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "miniyuxi_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# sidecar（拉起/停止 Python 内核）走官方 shell 插件
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

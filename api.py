@@ -198,6 +198,27 @@ def health():
     }
 
 
+# ---------------- 桌面 sidecar 契约（P3）----------------
+# 桌面外壳退出前调一次，让 sidecar 走优雅关闭（而不是被硬杀留下孤儿进程）。
+# 权限收在 tenant.manage（仅管理员），且 sidecar 恒定只监听 127.0.0.1。
+_SHUTDOWN_HOOKS: list = []
+
+
+def register_shutdown_hook(fn) -> None:
+    """由启动器（run.py --sidecar）注册真正的停机动作。"""
+    _SHUTDOWN_HOOKS.append(fn)
+
+
+@app.post("/api/desktop/shutdown")
+def desktop_shutdown(p: auth.Principal = Depends(need("tenant.manage"))):
+    for fn in _SHUTDOWN_HOOKS:
+        try:
+            fn()
+        except Exception:
+            pass
+    return {"ok": True, "shutdown": True, "by": p.username}
+
+
 @app.post("/api/auth/login")
 def login(body: LoginIn):
     conn = db.connect()

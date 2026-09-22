@@ -1,0 +1,16 @@
+{
+  "name": "miniyuxi-desktop",
+  "private": true,
+  "version": "0.2.0",
+  "description": "MiniYuxi 桌面端外壳：Tauri 窗口 + 现有 Python 内核作 sidecar 常驻",
+  "type": "module",
+  "scripts": {
+    "sidecar": "python ../../scripts/build_sidecar.py",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:debug": "tauri build --debug"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

@@ -27,6 +27,27 @@ except Exception:
 DEFAULT_SECRET = "dev-only-change-me-please-32bytes"
 
 
+def _frozen_bootstrap() -> None:
+    """PyInstaller 冻结（桌面 sidecar 打包）时，把数据目录固定到用户目录。
+
+    冻结后 BASE_DIR 指向临时解压目录 _MEIPASS，若沿用会造成「每次启动都像全新安装」。
+    这里在 import core 之前设置 MINIYUXI_DATA_DIR，让 config.DATA_DIR 落在稳定位置。
+    """
+    if not getattr(sys, "frozen", False):
+        return
+    if os.getenv("MINIYUXI_DATA_DIR"):
+        return
+    if sys.platform == "win32":
+        root = os.getenv("LOCALAPPDATA") or os.path.expanduser("~")
+        path = os.path.join(root, "MiniYuxi", "data")
+    elif sys.platform == "darwin":
+        path = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "MiniYuxi", "data")
+    else:
+        path = os.path.join(os.path.expanduser("~"), ".local", "share", "miniyuxi")
+    os.makedirs(path, exist_ok=True)
+    os.environ["MINIYUXI_DATA_DIR"] = path
+
+
 def _load_dotenv() -> None:
     """零依赖加载项目根目录 .env（若存在）。必须在 import core 之前调用，使 config 读到键值。
     仅解析简单的 KEY=VALUE 行，跳过注释(#)与空行；已存在的环境变量不覆盖。"""
@@ -55,7 +76,8 @@ def _ensure_secret() -> None:
     env_secret = os.getenv("MINIYUXI_SECRET", DEFAULT_SECRET)
     if env_secret != DEFAULT_SECRET:
         return  # 运维已显式指定密钥，尊重之
-    secret_path = os.path.join(BASE_DIR, "data", ".secret")
+    # 冻结（打包）模式下数据目录由 MINIYUXI_DATA_DIR 指定，密钥必须同目录保存
+    secret_path = os.path.join(os.getenv("MINIYUXI_DATA_DIR") or os.path.join(BASE_DIR, "data"), ".secret")
     # 复用已存在的密钥（重启幂等）
     if os.path.isfile(secret_path) and os.path.getsize(secret_path) >= 32:
         try:
@@ -237,15 +259,179 @@ def _schedule_pump() -> None:
         _t.sleep(60)
 
 
+# ---------------------------------------------------------------------------
+# 桌面端 sidecar 常驻模式（P3：Tauri 外壳 + 现有内核作 sidecar）
+# ---------------------------------------------------------------------------
+# 传输契约（外壳侧按前缀解析 stdout，另有一份 data/sidecar.json 兜底，防止 stdout 被缓冲吞掉）：
+#   MINIYUXI_SIDECAR_READY {"ok":true,"host":"127.0.0.1","port":8801,"url":"http://127.0.0.1:8801",
+#                           "token":"<jwt>","tenant":"default","user":"admin","role":"admin",
+#                           "pid":1234,"version":"0.2.0"}
+SIDECAR_READY_PREFIX = "MINIYUXI_SIDECAR_READY "
+SIDECAR_VERSION = "0.2.0"  # 与 pyproject.toml 保持一致
+# 桌面本地会话 token 默认 7 天（可用 MINIYUXI_SIDECAR_TOKEN_TTL_H 覆盖，单位小时）。
+# 该 token 只对「回环监听的 sidecar 本进程」有效，不用于任何网络暴露场景。
+SIDECAR_TOKEN_TTL = int(os.getenv("MINIYUXI_SIDECAR_TOKEN_TTL_H", str(24 * 7))) * 3600
+
+
+def _port_free(host: str, port: int) -> bool:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, port))
+            return True
+        except OSError:
+            return False
+
+
+def _pick_port(host: str, preferred: int) -> int:
+    """端口被占则自动顺延（桌面端与已有 Web 服务并存 / 多开时的关键兜底）。"""
+    if preferred and _port_free(host, preferred):
+        return preferred
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((host, 0))
+        return int(s.getsockname()[1])
+
+
+def _emit_ready(host: str, port: int, token: str, tenant: str, user: str,
+                role: str, stop: "threading.Event") -> None:
+    """就绪探针：/api/health 返回 200 后，在 stdout 打一行机器可读 READY。"""
+    import json
+    import time
+    import urllib.request
+
+    url = f"http://{host}:{port}/api/health"
+    deadline = time.time() + 90
+    ok = False
+    while not stop.is_set() and time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=1.5) as r:
+                if r.status == 200:
+                    ok = True
+                    break
+        except Exception:
+            time.sleep(0.3)
+    if stop.is_set():
+        return
+    payload = {
+        "ok": ok, "host": host, "port": port, "url": f"http://{host}:{port}",
+        "token": token, "tenant": tenant, "user": user, "role": role,
+        "pid": os.getpid(), "version": SIDECAR_VERSION,
+    }
+    sys.stdout.write(SIDECAR_READY_PREFIX + json.dumps(payload, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+
+
+def sidecar_main(args) -> int:
+    """以 sidecar 形式常驻：强制回环、不开浏览器、自动选端口、READY 契约、优雅退出。
+
+    与 Web 端跑的是同一个 api.py + core/ 内核，桌面外壳只是另一个入口。
+    """
+    import atexit
+    import json
+
+    host = "127.0.0.1"                      # 桌面 sidecar 只监听回环，绝不暴露到网络
+    port = _pick_port(host, args.port)
+    tenant = os.getenv("MINIYUXI_SIDECAR_TENANT", "default")
+    user = os.getenv("MINIYUXI_SIDECAR_USER", "admin")
+    role = "admin"
+
+    _frozen_bootstrap()   # 冻结（打包）模式下把数据目录固定到用户目录，必须在 import core 之前
+
+    from core import auth, config, db
+
+    db.init_db()
+    try:
+        from core import backup, labor_relations
+        labor_relations.init()
+        backup.daily_backup()
+        labor_relations.sync_all()
+    except Exception as exc:
+        print(f"  （sidecar 启动钩子异常，已忽略：{exc}）", file=sys.stderr)
+    _register_default_jobs()
+    threading.Thread(target=_schedule_pump, daemon=True).start()
+
+    token = auth.make_token({"tid": tenant, "sub": user, "role": role}, ttl=SIDECAR_TOKEN_TTL)
+    info = {
+        "host": host, "port": port, "url": f"http://{host}:{port}", "token": token,
+        "tenant": tenant, "user": user, "role": role, "pid": os.getpid(),
+        "version": SIDECAR_VERSION, "db": str(config.DB_PATH),
+    }
+    sidecar_path = os.path.join(str(config.DATA_DIR), "sidecar.json")
+
+    def _cleanup() -> None:
+        try:
+            os.remove(sidecar_path)
+        except OSError:
+            pass
+
+    os.makedirs(os.path.dirname(sidecar_path), exist_ok=True)
+    try:
+        with open(sidecar_path, "w", encoding="utf-8") as f:
+            json.dump(info, f, ensure_ascii=False, indent=2)
+    except OSError as exc:
+        print(f"  ✗ sidecar 无法写入 {sidecar_path}：{exc}", file=sys.stderr)
+        return 1
+    atexit.register(_cleanup)
+
+    print(f"  sidecar 监听 http://{host}:{port}（仅回环）· pid {os.getpid()}", file=sys.stderr)
+    print(f"  数据库 {config.DB_PATH}", file=sys.stderr)
+
+    stop = threading.Event()
+    threading.Thread(target=_emit_ready,
+                     args=(host, port, token, tenant, user, role, stop),
+                     daemon=True).start()
+
+    import uvicorn
+
+    import api
+    from api import app
+
+    cfg = uvicorn.Config(app, host=host, port=port, log_level="warning", access_log=False)
+    server = uvicorn.Server(cfg)
+    # 桌面外壳退出前 POST /api/desktop/shutdown → 优雅停机（不留孤儿进程）
+    api.register_shutdown_hook(lambda: setattr(server, "should_exit", True))
+
+    # stdin 看门狗（可选）：外壳进程被硬杀时管道关闭 → sidecar 自行退出，避免变孤儿。
+    # 默认关闭，因为 Tauri 可能给 sidecar 分配 null stdin（会立刻读到 EOF 而误退出）。
+    if os.getenv("MINIYUXI_SIDECAR_WATCH_STDIN") == "1":
+        def _stdin_watchdog() -> None:
+            try:
+                while True:
+                    if not sys.stdin.readline():   # EOF / 管道关闭
+                        break
+            except Exception:
+                pass
+            stop.set()
+            server.should_exit = True
+
+        threading.Thread(target=_stdin_watchdog, daemon=True).start()
+
+    try:
+        server.run()          # 阻塞；SIGINT/SIGTERM 由 uvicorn 转为优雅退出
+    finally:
+        stop.set()
+        _cleanup()
+    return 0
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default=os.getenv("MINIYUXI_HOST", "127.0.0.1"))
     ap.add_argument("--port", type=int, default=int(os.getenv("MINIYUXI_PORT", "8801")))
     ap.add_argument("--no-open", action="store_true")
+    ap.add_argument("--sidecar", action="store_true",
+                    help="桌面端 sidecar 常驻模式：强制回环、不开浏览器、自动选端口、"
+                         "就绪后在 stdout 打印 MINIYUXI_SIDECAR_READY 契约行")
     args = ap.parse_args()
 
+    _frozen_bootstrap()
     _load_dotenv()    # 必须在 import core / _ensure_secret 之前，加载 .env 中的密钥
     _ensure_secret()  # 必须在 import core 之前，使 config.SECRET_KEY 取到正确值
+
+    if args.sidecar:
+        sys.exit(sidecar_main(args))
 
     from core import config, db
 

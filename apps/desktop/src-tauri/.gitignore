@@ -1,0 +1,8 @@
+# Rust 构建产物
+/target/
+gen/schemas/
+
+# 打包出来的 Python 内核（体积大，按平台各自构建；见 scripts/build_sidecar.py）
+/binaries/*.exe
+/binaries/*
+!/binaries/.gitkeep

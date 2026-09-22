@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "MiniYuxi 桌面外壳权限：只允许拉起/停止自有 sidecar，不给任意命令执行。",
+  "windows": ["splash", "workbench"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        { "name": "binaries/miniyuxi-sidecar", "sidecar": true }
+      ]
+    },
+    "shell:allow-kill",
+    "core:event:allow-emit",
+    "core:event:allow-listen",
+    "core:webview:allow-internal-toggle-devtools"
+  ]
+}

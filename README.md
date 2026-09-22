@@ -35,9 +35,26 @@ python tests/selftest.py                            # 期望 20/20
 
 默认账号：`default / admin / admin123`（**首次部署务必改密**）。
 
-### 🖥️ Desktop 端（路线图中 · 复用内核作 sidecar）
+### 🖥️ Desktop 端（Tauri + Python sidecar · 已落地 P3）
 
-Tauri 外壳加载同一 SPA，Python 内核以 sidecar 常驻本地；详见 [`docs/三端统一架构与开源增长方案.md`](docs/三端统一架构与开源增长方案.md) 第 3 节。
+外壳只做窗口，Python 内核以 **sidecar 常驻**，本地打开的仍是同一份 `web/index.html`：
+
+```bash
+# 1. 离线贯通（不装 Rust / Node）：7 步验证「外壳→sidecar→api.py→core/」链路
+python examples/desktop_tour/code.py
+
+# 2. 开发态（外壳跑起来，内核走源码，跳过打包）
+$env:MINIYUXI_SIDECAR_PY = "$PWD\run.py"
+$env:MINIYUXI_PYTHON    = "...\python.exe"        # 与 requirements.txt 一致地那个
+cd apps/desktop && npm install && npm run dev
+
+# 3. 生产打包
+cd apps/desktop && npm run sidecar && npm run build   # 出 .msi / .nsis
+```
+
+完整说明（通信契约 / 打包矩阵 / 已知边界）见
+[`docs/desktop.md`](docs/desktop.md) 与 [`apps/desktop/README.md`](apps/desktop/README.md)。
+架构与开源增长策略见 [`docs/三端统一架构与开源增长方案.md`](docs/三端统一架构与开源增长方案.md) 第 3 节。
 
 ### ⌨️ CLI 端（已可用 · 薄客户端）
 

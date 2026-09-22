@@ -14,6 +14,7 @@
 """
 import os
 import sqlite3
+import sys
 import threading
 
 # 注意：sqlite_vec 不在这里顶层 import —— 它会连带拖入 numpy（实测约 350ms），
@@ -24,6 +25,8 @@ from . import config
 
 _local = threading.local()
 _SCHEMA_READY = False
+# sqlite-vec 扩展是否已加载成功（None=未探测）。打包/未装扩展时为 False，系统降级为纯 BM25。
+_VEC_OK: bool | None = None
 
 
 def connect() -> sqlite3.Connection:
@@ -54,21 +57,37 @@ def _load_vec_extension(conn: sqlite3.Connection) -> bool:
     实测给冷启动增加约 350ms。放到真正建连时才付，让 `import api` 与 CLI 更轻。
     加载失败不致命 —— 降级为纯 BM25/FTS5 检索，系统仍可用。
 
-    返回是否加载成功。
+    返回是否加载成功。失败原因会打到 stderr（冻结打包漏打 vec0.dll 时靠这条定位）。
     """
+    global _VEC_OK
+    ok = False
     try:
         conn.enable_load_extension(True)
         try:
             import sqlite_vec  # noqa: PLC0415
 
             sqlite_vec.load(conn)
-            return True
-        except Exception:
-            return False
+            ok = True
+        except Exception as exc:
+            print(f"[db] sqlite-vec 扩展加载失败，降级为纯 BM25/FTS5：{exc}", file=sys.stderr)
         finally:
             conn.enable_load_extension(False)
-    except Exception:
-        return False
+    except Exception as exc:
+        print(f"[db] 当前 SQLite 不支持加载扩展，降级为纯 BM25/FTS5：{exc}", file=sys.stderr)
+    _VEC_OK = ok
+    return ok
+
+
+def vec_available() -> bool:
+    """sqlite-vec 扩展是否可用（未探测过就现探一次）。
+
+    冻结打包（PyInstaller）漏打 vec0.dll、或环境未装 sqlite-vec 时返回 False，
+    调用方应据此跳过向量表相关操作，而不是硬建表把启动搞崩。
+    """
+    global _VEC_OK
+    if _VEC_OK is None:
+        _load_vec_extension(connect())
+    return bool(_VEC_OK)
 
 
 def _vec_table_sql(dim: int) -> str:
@@ -142,7 +161,13 @@ def init_db(force_rebuild_vec: bool = False) -> None:
     # 向量表：维度变更时重建（旧向量失效，需重新入库）
     if force_rebuild_vec:
         cur.execute("DROP TABLE IF EXISTS vec_chunks")
-    cur.execute(_vec_table_sql(config.EMB_DIM))
+    # 扩展不可用时（未装 sqlite-vec / 打包漏打 vec0.dll）不建 vec 表 ——
+    # 否则 `USING vec0(...)` 直接抛 "no such module: vec0" 把启动干掉。
+    # 与 _load_vec_extension「加载失败不致命」的设计一致：降级为纯 BM25/FTS5 检索。
+    if vec_available():
+        cur.execute(_vec_table_sql(config.EMB_DIM))
+    else:
+        print("[db] 跳过 vec_chunks 建表：sqlite-vec 不可用，检索降级为 BM25/FTS5", file=sys.stderr)
 
     conn.commit()
     _seed()

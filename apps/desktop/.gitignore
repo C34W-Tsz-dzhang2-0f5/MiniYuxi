@@ -1,0 +1,4 @@
+node_modules/
+dist/
+
+# 构建产物见 src-tauri/.gitignore（target/ · gen/schemas/ · binaries/ 下的打包 sidecar）

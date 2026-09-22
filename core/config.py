@@ -8,8 +8,10 @@ import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
-DATA_DIR.mkdir(exist_ok=True)
+# 桌面端打包（PyInstaller 冻结）时 BASE_DIR 会指向临时解压目录 _MEIPASS，
+# 数据必须落到稳定目录，否则每次启动都像全新安装。用 MINIYUXI_DATA_DIR 覆盖。
+DATA_DIR = Path(os.getenv("MINIYUXI_DATA_DIR", str(BASE_DIR / "data")))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---------- 存储 ----------
 DB_PATH = os.getenv("MINIYUXI_DB", str(DATA_DIR / "miniyuxi.db"))
