@@ -48,8 +48,11 @@ index_legacy.html
 !docs/assets/*.png
 
 # ===== Personal / dev QA scripts that embed real keys =====
-verify_*.py
-test_*.py
+# 只拦「仓库根目录」的临时脚本。⚠️ 这两条曾经不带斜杠，把 tests/ 下的正式测试也一并吞掉，
+# 导致 13 个测试文件从未入库、CI 引用时直接 No such file（2026-09-22 修）。
+# tests/ 是质量资产，必须入库；内嵌真 Key 的脚本请改用环境变量或 .env。
+/test_*.py
+/verify_*.py
 
 # ===== Internal planning docs（not for public release） =====
 目标任务书_v1.md
