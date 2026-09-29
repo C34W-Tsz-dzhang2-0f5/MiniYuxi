@@ -11,7 +11,10 @@
 ![MiniYuxi 三端统一工作台](docs/assets/readme_hero.png)
 
 > 🖥️ **桌面版安装包**（Windows x64，含内置 Python 内核，双击即用）：
-> [MiniYuxi_0.2.0_x64_en-US.msi](https://github.com/C34W-Tsz-dzhang2-0f5/MiniYuxi/releases/latest/download/MiniYuxi_0.2.0_x64_en-US.msi)（84 MB）
+> [MiniYuxi_0.4.0_x64_en-US.msi](https://github.com/C34W-Tsz-dzhang2-0f5/MiniYuxi/releases/latest/download/MiniYuxi_0.4.0_x64_en-US.msi)（约 95 MB · 待发布）
+>
+> ⚠️ 0.4.0 安装包需在装有 **WiX Toolset v3** 的 Windows 主机重新构建并发布：
+> `cd apps/desktop && npm run sidecar && npm run build`（产物位于 `target/release/bundle/msi/MiniYuxi_0.4.0_x64_en-US.msi`）。
 
 ## ✨ 核心特性
 
@@ -20,6 +23,9 @@
 - 🤖 **Agent 编排**：ReAct 主循环 + 工具治理（toolset 过滤 + 审批门）+ 多 Provider 故障转移。
 - 📚 **知识库 RAG**：BM25 + 向量 RRF 融合检索，中文 bigram 分词，sqlite-vec 零服务。
 - 🛡️ **安全审计**：hardline 命令拦截 → 审批 → 路径校验 → append-only 哈希链。
+- 🌐 **数据出境管控**：5 类目的地 × 10 个出口**全部过闸**，可按**数据分级**配置
+  （`allow` / `deny` / `approval`），出境日志（含被拒绝的）写入哈希链、只存脱敏摘要。
+- 📊 **办公套件**：内嵌开源 Univer（Apache-2.0），Agent 可产出**可编辑**的表格 / 文档，公式引擎本地求值。
 - ⏰ **定时任务**：Cron = Agent 任务（fresh session 执行，未知类型 fail-closed）。
 - 💾 **本地优先**：单 Python 进程、单 SQLite 文件，内存 65–70MB，备份即拷文件。
 
@@ -108,6 +114,19 @@ python scripts/verify.py --quick    # 只跑纯 stdlib 快卡点（约 2.5s）
 - SQLite 单写者，小团队可用；公网/高并发建议换 Postgres。
 - 定期备份 `data/miniyuxi.db`（含向量、审计链、账号）。
 - 接真实模型（可选）：`LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`；不设 `EMB_API_KEY` 则仅 BM25，功能不中断。
+
+**数据出境管控**（企业交付重点，详见 `CHANGELOG.md [0.4.0]`）：
+
+- 出境**默认全放行**（定位是「数据可以出本机」）；企业侧用姿态预设一键收紧：
+  `balanced`（默认）/ `strict`（机密级出境需审批）/ `lockdown`（全禁）。
+- 环境变量可强制覆盖（不可被 UI 改回）：`MINIYUXI_EGRESS_<CLASS>=allow|deny|approval`
+  （`CLASS` ∈ `LLM` / `EMBEDDING` / `SEARCH` / `EXTERNAL_RAG` / `CONNECTOR`）；
+  `MINIYUXI_EGRESS_LOCKDOWN=1` 一键全禁。
+- 闸门自身异常默认 **fail-open**（不让审计组件变成单点故障）；严格场景设
+  `MINIYUXI_EGRESS_FAIL_MODE=closed`。
+- 出境日志**只记目的地主机 / 字节数 / 脱敏截断摘要**，绝不记载荷全文；同时写入 SOC 哈希链。
+- ⚠️ **商务/法务**：技术开关不等于合规完成。面向企业交付时，个保法下的**告知同意**与
+  **数据处理协议（DPA）**仍是必备动作。
 
 ## 🤝 贡献
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "MiniYuxi",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "identifier": "com.miniyuxi.desktop",
   "build": {
     "beforeDevCommand": "",
@@ -41,6 +41,6 @@
     "copyright": "Copyright © 2026 MiniYuxi contributors",
     "category": "Productivity",
     "shortDescription": "本地优先的企业级 AI 助手（三端统一）",
-    "longDescription": "MiniYuxi：内核（Agent Loop / RAG / 工具治理 / 审计）只写一次，Web / Desktop / CLI 三端共用。桌面端用 Tauri 外壳 + Python 内核 sidecar，数据全部留在本机。"
+    "longDescription": "MiniYuxi：内核（Agent Loop / RAG / 工具治理 / 审计）只写一次，Web / Desktop / CLI 三端共用。桌面端用 Tauri 外壳 + Python 内核 sidecar，数据默认留在本机，并可通过内置「数据出境管控」按数据分级（allow / deny / approval）按需放行且全程可审计（零 Docker、可商用）。"
   }
 }

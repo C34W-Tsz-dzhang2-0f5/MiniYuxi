@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "miniyuxi"
-version = "0.2.0"
-description = "MiniYuxi · 企业级 AI 助手（三端统一 · 本地优先 · 零 Docker）"
+version = "0.4.0"
+description = "MiniYuxi · 企业级 Agent（数据可出本机 · 零 Docker · 可商用）"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

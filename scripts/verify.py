@@ -41,6 +41,8 @@ STEPS: list[tuple[str, list[str], tuple[str, ...], bool]] = [
      [PY, "tests/_scan_undef.py"], (), True),
     ("引用闸门单测（法务无引用不出文）",
      [PY, "tests/_verify_citation_gate.py"], (), True),
+    ("技能安装 / 视频生成（T6 闭环）",
+     [PY, "tests/_verify_skill_install_and_video.py"], ("requests",), False),
     ("桌面端 sidecar 单元（token ttl）",
      [PY, "tests/test_desktop_sidecar.py", "--unit-only"], (), True),
     ("路由冒烟（前端验收）",

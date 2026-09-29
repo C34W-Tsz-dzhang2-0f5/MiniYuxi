@@ -28,7 +28,8 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 DEFAULT_TENANT = os.getenv("MINIYUXI_TENANT", "default")
-VERSION = "0.2.0"
+# 版本号唯一来源：core/version.py（cli.py 第 28 行已把 BASE_DIR 插入 sys.path）
+from core.version import __version__ as VERSION  # noqa: E402
 
 
 def _init_console() -> None:

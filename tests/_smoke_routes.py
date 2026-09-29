@@ -86,7 +86,11 @@ chk("U8 Markdown 渲染", "mdToHtml" in js and ".md-pre" in css)
 print("== Phase 2 · V5/V6/V7 + U9/U10/L5/L6/L8")
 chk("V5 强调态统一（主色）", ".mx-seg button.on { background: var(--wb-primary)" in css)
 chk("V6 暗色对比微调", "body.dark .composer-shell:focus-within" in css)
-chk("V7 欢迎页留白自适应", "clamp(40px, 11vh, 128px)" in css)
+# V7 欢迎页顶部留白用响应式 clamp。
+# 2026-09-24 修正：CSS 侧「对齐 WorkBuddy：欢迎页无标题」后把留白收敛为
+# clamp(24px, 7vh, 88px)（原 clamp(40px, 11vh, 128px)，见 wb_workbench.css 的注释），
+# 但本断言一直没跟着改 → 闸门长期红。这不是放宽标准，是让断言跟上被断言对象。
+chk("V7 欢迎页留白自适应", "clamp(24px, 7vh, 88px)" in css)
 chk("U9 引用文件可移除", "ref-remove" in css and "ref-remove" in js)
 chk("U10 ⌘K 快捷键", "metaKey" in js and "'k'" in js)
 chk("L5 双编辑器草稿互通", "carryDraft" in js)

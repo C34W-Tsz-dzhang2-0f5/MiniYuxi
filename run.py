@@ -97,9 +97,16 @@ def _ensure_secret() -> None:
         with open(secret_path, "w", encoding="utf-8") as f:
             f.write(new_secret)
         os.environ["MINIYUXI_SECRET"] = new_secret
+        try:
+            # ⚠️ 数据目录与项目不同盘符时（如 MINIYUXI_DATA_DIR 指到 D:\）relpath 会抛
+            # ValueError: path is on mount 'C:', start on mount 'E:'，且它**不是 OSError**，
+            # 会穿透下面的 except 直接把启动干掉。这里降级为显示绝对路径。
+            shown = os.path.relpath(secret_path, BASE_DIR)
+        except ValueError:
+            shown = str(secret_path)
         print("=" * 62)
         print("  ⚠ 安全警告：检测到使用默认密钥，已自动生成随机密钥")
-        print(f"    并写入 {os.path.relpath(secret_path, BASE_DIR)}（请妥善保管）")
+        print(f"    并写入 {shown}（请妥善保管）")
         print("    生产环境建议使用 MINIYUXI_SECRET 环境变量显式指定。")
         print("=" * 62)
     except OSError as exc:
@@ -265,9 +272,11 @@ def _schedule_pump() -> None:
 # 传输契约（外壳侧按前缀解析 stdout，另有一份 data/sidecar.json 兜底，防止 stdout 被缓冲吞掉）：
 #   MINIYUXI_SIDECAR_READY {"ok":true,"host":"127.0.0.1","port":8801,"url":"http://127.0.0.1:8801",
 #                           "token":"<jwt>","tenant":"default","user":"admin","role":"admin",
-#                           "pid":1234,"version":"0.2.0"}
+#                           "pid":1234,"version":"0.3.0"}
 SIDECAR_READY_PREFIX = "MINIYUXI_SIDECAR_READY "
-SIDECAR_VERSION = "0.2.0"  # 与 pyproject.toml 保持一致
+# 版本号唯一来源：core/version.py（纯常量模块，无副作用，可安全早引入）。
+# 历史教训：这里曾写死 "0.2.0"、api.py 写死 "0.1.0"，导致 /api/health 与 sidecar.json 报不同版本。
+from core.version import __version__ as SIDECAR_VERSION  # noqa: E402
 # 桌面本地会话 token 默认 7 天（可用 MINIYUXI_SIDECAR_TOKEN_TTL_H 覆盖，单位小时）。
 # 该 token 只对「回环监听的 sidecar 本进程」有效，不用于任何网络暴露场景。
 SIDECAR_TOKEN_TTL = int(os.getenv("MINIYUXI_SIDECAR_TOKEN_TTL_H", str(24 * 7))) * 3600

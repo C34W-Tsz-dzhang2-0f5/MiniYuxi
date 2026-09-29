@@ -1,6 +1,6 @@
 [package]
 name = "miniyuxi-desktop"
-version = "0.2.0"
+version = "0.4.0"
 description = "MiniYuxi 桌面端外壳：Tauri 窗口 + Python 内核作 sidecar 常驻"
 authors = ["MiniYuxi contributors"]
 edition = "2021"

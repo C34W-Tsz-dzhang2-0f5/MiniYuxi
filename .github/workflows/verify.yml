@@ -18,6 +18,11 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -29,6 +34,9 @@ jobs:
 
       - name: Citation gate unit test (legal/labor no-fabrication)
         run: python tests/_verify_citation_gate.py
+
+      - name: Skill install + video generation test (T6 closed loop)
+        run: python tests/_verify_skill_install_and_video.py
 
       # 桌面端 sidecar 只跑单元：端到端 tour 依赖 PyInstaller 产物（Windows 专属），放 Linux CI 会假红
       - name: Desktop sidecar unit test (token ttl)
@@ -45,3 +53,38 @@ jobs:
 
       - name: Perf optimization tests
         run: python -m pytest tests/test_perf_optimizations.py -q
+
+      # —— 企业级「可商用 / 分发件与内核一致」硬闸门 ——
+      - name: Version consistency gate (anti version-drift)
+        run: python scripts/check_version_consistency.py --quiet
+
+      - name: Commercial license audit (npm deps of office-bundle)
+        run: |
+          cd tools/office-bundle && npm ci
+          cd ../..
+          python scripts/audit_licenses.py --pkg tools/office-bundle --quiet
+
+  # 桌面端实际分发件（Windows .exe sidecar）的冻结产物校验。
+  # 必须跑在 Windows runner：sidecar 是 PyInstaller 打的 Windows PE，
+  # 且 Tauri externalBin 仅 Windows 平台，Linux CI 跑会假红。
+  build-sidecar:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build Windows sidecar (PyInstaller -> Tauri externalBin)
+        run: python scripts/build_sidecar.py
+
+      - name: Verify frozen sidecar contents
+        run: python scripts/verify_sidecar_contents.py
