@@ -125,11 +125,23 @@
 1. ✅ **已办**：按 §五 切分提交入库（解 Gate 卡点；消除「95 文件无历史兜底」高风险）——共 15 个提交。
 2. ✅ **已办**：补 `docs/skill-install-and-video-20260929.md` 设计文档（S1 补件）。
 3. ✅ **已办**：用 playwright + chromium 跑真实浏览器回归（S4 补强）——`tests/_e2e_browser_skill_install.py` **7/7 PASS**。
-4. 🟢 **待办**：把「技能安装（三来源 + 嵌套集合仓库 + staging 同盘）」经验用 `skill-creator` 固化成 skill（S6 资产化）。
+4. ✅ **已办**：把「技能安装（三来源 + 嵌套集合仓库 + staging 同盘 + 冻结态持久化）」经验固化成 skill ——
+   `~/.workbuddy-ai/skills/miniyuxi-skill-install/`（S6 资产化）；同时**修正** `miniyuxi-module-scaffold`
+   里被证伪的「装机目录勘误」结论（原文说"部署只认 `binaries\`"，实测安装器只装 `INSTALLDIR` 根）。
 5. ✅ **已办**：重出 MSI——WiX v3.14 便携版就位，sidecar 重打（含新特性，64.5 MB）＋
-   `MiniYuxi_0.4.0_x64_en-US.msi`（66 MB）构建成功，装机版现已含本次新功能。
+   `MiniYuxi_0.4.0_x64_en-US.msi`（66 MB）构建成功。
+6. ✅ **已办**：**MSI 干净环境试装验证**（此前唯一未验环节）。手法：WiX `dark.exe` 反编译 MSI 校验 File 表
+   ＋ 抽出 bundled sidecar 在隔离 `MINIYUXI_DATA_DIR` 下独立运行、打 `/api/health` 与技能安装接口。
+   **结论：payload 正确**（抽出 sidecar 的 md5 与构建源完全一致、`/api/health` 报 `0.4.0`、技能安装 API 可用），
+   **但暴露 2 个「干净装机才发作」的缺陷，均已修复**：
 
-> **更新（2026-09-29）**：②③⑤ 均已落地，S1 / S4 / S6 缺口补齐；仅剩第 4 项（经验固化成 skill）。
+   | # | 缺陷 | 证据 | 修复 |
+   |---|---|---|---|
+   | 🔴 1 | 安装器把 sidecar 装在 `INSTALLDIR` **根**，`lib.rs` 却按 `binaries/miniyuxi-sidecar` 解析 → 干净装机 sidecar 起不来 | MSI File 表 `<Directory Id="INSTALLDIR">` 下 `Name="miniyuxi-sidecar.exe"`，**无 binaries 子目录**；`tauri-plugin-shell` 的 `relative_command_path()` = `exe_dir.join(name)` | `lib.rs` 改 `SIDECAR_NAMES = ["miniyuxi-sidecar", "binaries/miniyuxi-sidecar"]` 按序尝试 |
+   | 🔴 2 | 冻结态技能目录落在 PyInstaller `_MEIPASS`（进程退出即删）→ 装进去的技能「重启就丢」 | 安装返回 `path=...\Temp\_MEI000019002\skills\...`；重启后 `count=83`（内置）、`has clean-verify-demo? False` | `skills_catalog` 支持 `MINIYUXI_SKILLS_DIR`；`run.py::_frozen_bootstrap` 指到 `<MiniYuxi>/skills` 并从内置播种 |
+
+> **更新（2026-09-29）**：②③⑤ ＋ 新增的「干净环境试装」与「经验固化成 skill」均已落地，
+> S1 / S4 / S6 缺口全部补齐，审计待办清零。
 
 ---
 

@@ -162,3 +162,46 @@
 | 真实服务 e2e | install 200 · count=38 · 无 staging 残留 |
 | 前端符号扫描 | `tests/_scan_undef.py` 通过 |
 | 全量闸门 | `python scripts/verify.py` **6/6 绿**（含本特性步骤，已接入 CI） |
+
+---
+
+## 补记（2026-09-29 · MSI 干净环境试装发现，已修）
+
+设计初版只覆盖了「源码 / 网页环境」的行为。把 MSI 抽出来在干净目录试装后，暴露 2 个
+**打包 / 装机专属**的缺陷——二者在源码环境 100% 正常，只在冻结 / 装机态发作。
+
+### D9 · 冻结态技能目录必须持久化（否则「重启就丢」）
+
+**问题**：`SKILLS_DIR` 原为 `<core 的父目录>/skills`。PyInstaller `--onefile` 下 `__file__` 落在
+临时解压目录 `_MEIPASS`（`%TEMP%\_MEIxxxxxx`），**进程退出即删除** → 装进去的技能下次启动就没了。
+
+**实测证据**：
+```
+POST /api/skills/install → path = C:\Users\ADMINI~1\AppData\Local\Temp\_MEI000019002\skills\clean-verify-demo
+重启后 GET /api/skills/list → count=83（内置），has clean-verify-demo? False
+```
+
+**决策**：与 `MINIYUXI_DATA_DIR` 同构——新增 `MINIYUXI_SKILLS_DIR` 覆盖；
+`run.py::_frozen_bootstrap()`（**必须在 `import core` 之前**）指向 `<数据目录同级>/skills`，
+首次启动从内置 `_MEIPASS/skills` **播种一次**（已存在则不动，保住用户自装技能）。
+
+**为何放数据目录同级而非 `data/` 内**：避免 83 个内置技能目录灌进 `daily_backup` 的 data 快照。
+**注意**：技能段落必须写在 `if os.getenv("MINIYUXI_DATA_DIR"): return` **之外**，
+否则外部预设数据目录时（测试 / 企业 IT 指盘）技能目录不会被设置。
+
+### D10 · 打包态 sidecar 名：`externalBin` 的路径 ≠ 运行期相对路径
+
+**问题**：`tauri.conf.json` 的 `externalBin: ["binaries/miniyuxi-sidecar"]` 是**构建期源路径**；
+打包器只保留**文件名**放到主 exe 同目录（MSI File 表确证：`<Directory Id="INSTALLDIR">` 下
+`Name="miniyuxi-sidecar.exe"`，**无 `binaries` 子目录**）。
+而 `tauri-plugin-shell::relative_command_path()` 做的是 `exe_dir.join(name)`，
+旧代码 `.sidecar("binaries/miniyuxi-sidecar")` 会去找 `<INSTALLDIR>/binaries/...` → **干净装机必失败**。
+
+**决策**：`lib.rs` 改为候选名按序尝试：`["miniyuxi-sidecar", "binaries/miniyuxi-sidecar"]`，
+裸名（安装器实际落盘位置）优先，旧 `binaries\` 手工布局兜底。
+
+**副作用说明**：装机目录 `binaries\` 下的三份 sidecar 是**手工补的**，非安装器产物；
+修复后不再依赖它，但保留兜底以免旧装机机器失效。
+
+**验证手法（无需真装机器）**：WiX `dark.exe -x <抽出目录> -o dump.wxs <msi>` 反编译看 File 表，
+再用抽出的 payload 在隔离 `MINIYUXI_DATA_DIR` 下独立运行 sidecar 打 `/api/health`。
