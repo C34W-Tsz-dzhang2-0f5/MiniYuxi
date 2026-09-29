@@ -40,11 +40,20 @@ def _to_openai_tools(allowed_toolsets=None) -> list:
 
 
 def run(system: str, user_prompt: str, history: list | None = None,
-        tenant_id: str = None, memories: list | None = None) -> dict | None:
-    """执行自主循环。返回 {answer, mode, model, tool_calls_used, loop_trace, memories_used}
-    或 None（离线/网关失败，由 caller 退化）。"""
+        tenant_id: str = None, memories: list | None = None, trace_id: str = None) -> dict | None:
+    """执行自主循环。返回 {answer, mode, model, tool_calls_used, loop_trace, memories_used, trace_id}
+    或 None（离线/网关失败，由 caller 退化）。
+
+    企业级增强（对齐 docs/enterprise-boundary-desktop-web-20260929.md）：
+    - ④ 可观测性：每次 LLM 调用 / 工具执行都挂 trace_id 结构化 span（observability）。
+    - ⑤ 成本硬熔断：每步过 BudgetGuard（步数/超时/token/成本/租户预算/失控循环），熔断即终止并告警 SOC。
+    """
     if not config.llm_enabled():
         return None
+
+    from . import observability, circuit_breaker, soc_audit
+    tid = observability.start_trace(trace_id)
+    guard = circuit_breaker.BudgetGuard(tenant_id=tenant_id)
 
     tools = _to_openai_tools()
     messages = []
@@ -67,11 +76,23 @@ def run(system: str, user_prompt: str, history: list | None = None,
     used_tools: list = []
     loop_trace: list = []
     last_assistant = ""
+    circuit_open = False
+    circuit_reason = None
 
     for _ in range(MAX_LOOPS):
-        res = gateway.chat_with_tools(system, messages, tools, tenant_id=tenant_id)
+        # 步级熔断检查（步数 / 超时 / token / 成本 / 租户预算）
+        decision, reason = guard.check_step()
+        if decision == "open":
+            circuit_open, circuit_reason = True, reason
+            break
+        with observability.span("llm", kind="llm", tenant_id=tenant_id) as lsp:
+            res = gateway.chat_with_tools(system, messages, tools, tenant_id=tenant_id)
         if not res["ok"]:
+            lsp.set_status("offline")
             return None  # 网关失败（如限流）→ caller 退化
+        u = res.get("usage")
+        if u:
+            guard.record_tokens((u.get("prompt_tokens") or 0) + (u.get("completion_tokens") or 0))
         msg_content = res["text"]
         tool_calls = res["tool_calls"]
         last_assistant = msg_content or last_assistant
@@ -88,9 +109,18 @@ def run(system: str, user_prompt: str, history: list | None = None,
             final_text = msg_content
             break
 
+        inner_break = False
         for tc in tool_calls:
             name, args = tc["name"], (tc["arguments"] or {})
-            r = tools_registry.run_tool_governed(name, args, tenant_id=tenant_id, session_id=None)
+            decision, reason = guard.check_step(action_key=name)  # 含失控循环检测
+            if decision == "open":
+                circuit_open, circuit_reason = True, reason
+                inner_break = True
+                break
+            with observability.span("tool:" + name, kind="tool", tenant_id=tenant_id) as tsp:
+                r = tools_registry.run_tool_governed(name, args, tenant_id=tenant_id, session_id=None)
+                if "error" in r:
+                    tsp.set_status("error")
             if "result" in r:
                 out = str(r["result"])
             elif "content" in r:
@@ -102,15 +132,35 @@ def run(system: str, user_prompt: str, history: list | None = None,
             used_tools.append(name)
             loop_trace.append({"tool": name, "args": args, "result": out[:600]})
             messages.append({"role": "tool", "tool_call_id": tc["id"], "name": name, "content": out[:1600]})
+        if inner_break:
+            break
 
     if not final_text:
         final_text = last_assistant or "（未能生成最终回答）"
 
-    return {
+    result = {
         "answer": final_text,
         "mode": "agent",
         "model": config.LLM_MODEL,
         "tool_calls_used": used_tools,
         "loop_trace": loop_trace,
         "memories_used": bool(memories),
+        "trace_id": tid,
     }
+    if circuit_open:
+        result["circuit_open"] = True
+        result["circuit_reason"] = circuit_reason
+        # 告警：写 SOC 链（best-effort，绝不因失败影响返回）
+        try:
+            soc_audit.log({
+                "type": "circuit_breaker",
+                "reason": circuit_reason,
+                "tenant_id": tenant_id,
+                "steps": guard.steps,
+                "tokens": guard.tokens,
+                "cost": round(guard.cost, 6),
+                "trace_id": tid,
+            })
+        except Exception:
+            pass
+    return result
