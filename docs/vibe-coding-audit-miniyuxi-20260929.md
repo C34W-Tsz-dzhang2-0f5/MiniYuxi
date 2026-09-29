@@ -122,11 +122,14 @@
 
 ## 七、下一步（建议优先级）
 
-1. 🔴 **立即**：按 §五 切分提交入库（解 Gate 卡点；同时消除「95 文件无历史兜底」的高风险）。
-2. 🟡 **本周**：补 `docs/skill-install-and-video-20260929.md` 设计文档（S1 补件）。
-3. 🟡 **本周**：用 playwright-cli / agent-browser 跑一轮真实浏览器回归（S4 补强）。
-4. 🟢 **择机**：把「技能安装（三来源 + 嵌套集合仓库 + staging 同盘）」经验用 `skill-creator` 固化成 skill（S6 资产化）。
-5. 🟢 **择机**：桌面 sidecar 仍是 0.4.0 旧包，需重出 MSI 才让本次新功能在装机版生效（本机无 WiX v3，需在装有 WiX 的 Windows 主机构建）。
+1. ✅ **已办**：按 §五 切分提交入库（解 Gate 卡点；消除「95 文件无历史兜底」高风险）——共 15 个提交。
+2. ✅ **已办**：补 `docs/skill-install-and-video-20260929.md` 设计文档（S1 补件）。
+3. ✅ **已办**：用 playwright + chromium 跑真实浏览器回归（S4 补强）——`tests/_e2e_browser_skill_install.py` **7/7 PASS**。
+4. 🟢 **待办**：把「技能安装（三来源 + 嵌套集合仓库 + staging 同盘）」经验用 `skill-creator` 固化成 skill（S6 资产化）。
+5. ✅ **已办**：重出 MSI——WiX v3.14 便携版就位，sidecar 重打（含新特性，64.5 MB）＋
+   `MiniYuxi_0.4.0_x64_en-US.msi`（66 MB）构建成功，装机版现已含本次新功能。
+
+> **更新（2026-09-29）**：②③⑤ 均已落地，S1 / S4 / S6 缺口补齐；仅剩第 4 项（经验固化成 skill）。
 
 ---
 
