@@ -2,7 +2,9 @@
 """指令层 Skill 注册表（对齐 LibreChat SKILL.md 契约）。
 
 职责：扫描项目根 skills/ 目录下所有 SKILL.md，解析 YAML frontmatter，对外提供
-list_skills() / load_skill(name) / inject_text() / scan_skills() / normalize_contract()。
+list_skills(skills_dir=None) / load_skill(name, skills_dir=None) / inject_text() /
+scan_skills(skills_dir=None) / normalize_contract()。
+（skills_dir 参数用于隔离目录场景；省略则用模块级 SKILLS_DIR。）
 
 字段契约（对齐 LibreChat，并补 MiniYuxi 扩展）：
 - name          技能唯一 id（必填；缺失视为损坏、跳过）
@@ -118,14 +120,19 @@ def _to_contract(meta: dict, path: str, body: str) -> dict:
     }
 
 
-def _scan_with_skips() -> tuple:
-    """扫描全部 SKILL.md；返回 (技能列表, 被跳过文件相对路径列表)。"""
+def _scan_with_skips(skills_dir: str = None) -> tuple:
+    """扫描全部 SKILL.md；返回 (技能列表, 被跳过文件相对路径列表)。
+
+    skills_dir 省略时用模块级 SKILLS_DIR；显式传入用于「隔离目录」场景
+    （安装后校验 / 测试）——避免出现「装到 A 目录、却拿 B 目录去校验」的错配。
+    """
+    root = skills_dir or SKILLS_DIR
     out = []
     skipped = []
-    if not os.path.isdir(SKILLS_DIR):
+    if not os.path.isdir(root):
         return out, skipped
-    for path in sorted(glob.glob(os.path.join(SKILLS_DIR, "**", "SKILL.md"), recursive=True)):
-        rel = os.path.relpath(path, SKILLS_DIR)
+    for path in sorted(glob.glob(os.path.join(root, "**", "SKILL.md"), recursive=True)):
+        rel = os.path.relpath(path, root)
         try:
             text = open(path, encoding="utf-8", errors="ignore").read()
         except Exception:
@@ -141,23 +148,26 @@ def _scan_with_skips() -> tuple:
 
 # 目录级缓存：skills/ 目录 mtime 不变则直接返回上次扫描结果，
 # 避免每次 /api/skills/list（UI 高频调用）都做递归 glob 扫描文件系统。
-_skills_cache = {"mtime": 0.0, "val": None}
+# 缓存键含**目录绝对路径**：允许对不同的 skills_dir 各缓存一份（安装校验用隔离目录）。
+_skills_cache = {"key": None, "val": None}
 _last_skipped = []
 
 
-def list_skills() -> list:
+def list_skills(skills_dir: str = None) -> list:
     """列出全部已注册技能（dict 列表）。无任何技能时返回 []，不报错。
 
-    按 skills/ 目录 mtime 做缓存：目录未变动时跳过 glob 递归扫描。
+    按 (目录绝对路径, mtime) 做缓存：目录未变动时跳过 glob 递归扫描。
     """
+    root = skills_dir or SKILLS_DIR
     try:
-        mtime = os.path.getmtime(SKILLS_DIR) if os.path.isdir(SKILLS_DIR) else 0.0
+        mtime = os.path.getmtime(root) if os.path.isdir(root) else 0.0
     except OSError:
         mtime = 0.0
-    if _skills_cache["val"] is not None and _skills_cache["mtime"] == mtime:
+    key = (os.path.abspath(root), mtime)
+    if _skills_cache["val"] is not None and _skills_cache["key"] == key:
         return _skills_cache["val"]
-    skills, skipped = _scan_with_skips()
-    _skills_cache["mtime"] = mtime
+    skills, skipped = _scan_with_skips(root)
+    _skills_cache["key"] = key
     _skills_cache["val"] = skills
     global _last_skipped
     _last_skipped = skipped
@@ -170,17 +180,17 @@ def invalidate_cache() -> None:
     嵌套技能集合仓库的增删只改动**子目录** mtime，不改 SKILLS_DIR 顶层 mtime，
     因此仅靠 mtime 缓存会返回过期列表（删了还在、装了不显示）。
     """
-    _skills_cache["mtime"] = -1.0
+    _skills_cache["key"] = None
     _skills_cache["val"] = None
 
 
-def scan_skills() -> dict:
+def scan_skills(skills_dir: str = None) -> dict:
     """无缓存全量扫描：返回 {"skills": [...], "skipped": [...], "total": N}。
 
     用于可观测：确认损坏 frontmatter 被正确跳过（skipped 计数 + 文件名），
     以及当前技能总数。测试与运维排查用。
     """
-    skills, skipped = _scan_with_skips()
+    skills, skipped = _scan_with_skips(skills_dir or SKILLS_DIR)
     return {"skills": skills, "skipped": skipped, "total": len(skills) + len(skipped)}
 
 
@@ -206,9 +216,9 @@ def normalize_contract(item: dict) -> dict:
     return it
 
 
-def load_skill(name: str):
+def load_skill(name: str, skills_dir: str = None):
     """按 name 取单个技能完整信息；不存在返回 None。"""
-    for s in _scan_with_skips()[0]:
+    for s in _scan_with_skips(skills_dir or SKILLS_DIR)[0]:
         if s["name"] == name:
             return s
     return None
