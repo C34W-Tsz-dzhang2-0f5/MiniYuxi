@@ -68,8 +68,9 @@ def main() -> int:
 
     env = dict(os.environ)
     env["MINIYUXI_DATA_DIR"] = data_dir
-    # 让被起的内核用隔离的 skills 目录（skills_catalog.SKILLS_DIR 可由环境变量覆盖时生效；
-    # 若内核不支持则回落到仓库 skills/，脚本结束会清理同名技能）
+    # 让被起的内核用隔离的 skills 目录。
+    # 2026-09-29 起 skills_catalog 支持 MINIYUXI_SKILLS_DIR 覆盖（此前该设置是无效的，
+    # 内核会回落到仓库 skills/，只能靠脚本结尾清理同名技能兜底）。
     env["MINIYUXI_SKILLS_DIR"] = skills_dir
 
     proc = subprocess.Popen([venv_py, "run.py"], cwd=ROOT, env=env,
