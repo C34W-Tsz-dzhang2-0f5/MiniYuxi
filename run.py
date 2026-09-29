@@ -28,24 +28,43 @@ DEFAULT_SECRET = "dev-only-change-me-please-32bytes"
 
 
 def _frozen_bootstrap() -> None:
-    """PyInstaller 冻结（桌面 sidecar 打包）时，把数据目录固定到用户目录。
+    """PyInstaller 冻结（桌面 sidecar 打包）时，把数据 / 技能目录固定到用户目录。
 
     冻结后 BASE_DIR 指向临时解压目录 _MEIPASS，若沿用会造成「每次启动都像全新安装」。
-    这里在 import core 之前设置 MINIYUXI_DATA_DIR，让 config.DATA_DIR 落在稳定位置。
+    这里在 import core 之前设置 MINIYUXI_DATA_DIR 与 MINIYUXI_SKILLS_DIR，
+    让 config.DATA_DIR 和 skills_catalog.SKILLS_DIR 都落在稳定位置。
     """
     if not getattr(sys, "frozen", False):
         return
-    if os.getenv("MINIYUXI_DATA_DIR"):
-        return
-    if sys.platform == "win32":
-        root = os.getenv("LOCALAPPDATA") or os.path.expanduser("~")
-        path = os.path.join(root, "MiniYuxi", "data")
-    elif sys.platform == "darwin":
-        path = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "MiniYuxi", "data")
-    else:
-        path = os.path.join(os.path.expanduser("~"), ".local", "share", "miniyuxi")
-    os.makedirs(path, exist_ok=True)
-    os.environ["MINIYUXI_DATA_DIR"] = path
+    if not os.getenv("MINIYUXI_DATA_DIR"):
+        if sys.platform == "win32":
+            root = os.getenv("LOCALAPPDATA") or os.path.expanduser("~")
+            path = os.path.join(root, "MiniYuxi", "data")
+        elif sys.platform == "darwin":
+            path = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "MiniYuxi", "data")
+        else:
+            path = os.path.join(os.path.expanduser("~"), ".local", "share", "miniyuxi")
+        os.makedirs(path, exist_ok=True)
+        os.environ["MINIYUXI_DATA_DIR"] = path
+
+    # 技能目录同理：_MEIPASS/skills 是临时解压目录，进程退出即删 → 装进去的技能会「重启就丢」。
+    # 改为落在数据目录的**同级** <MiniYuxi>/skills（持久、且不进 daily_backup 的 data 快照），
+    # 首次启动从内置（_MEIPASS）技能播种一次；已存在则不动，保住用户自己装的技能。
+    if not os.getenv("MINIYUXI_SKILLS_DIR"):
+        data_dir = os.environ.get("MINIYUXI_DATA_DIR") or ""
+        skills_dir = os.path.join(os.path.dirname(os.path.normpath(data_dir)), "skills") if data_dir else ""
+        if skills_dir:
+            if not os.path.isdir(skills_dir):
+                bundled = os.path.join(getattr(sys, "_MEIPASS", "") or "", "skills")
+                if os.path.isdir(bundled):
+                    try:
+                        import shutil
+                        shutil.copytree(bundled, skills_dir)
+                    except OSError:
+                        os.makedirs(skills_dir, exist_ok=True)
+                else:
+                    os.makedirs(skills_dir, exist_ok=True)
+            os.environ["MINIYUXI_SKILLS_DIR"] = skills_dir
 
 
 def _load_dotenv() -> None:

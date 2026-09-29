@@ -26,8 +26,13 @@ import glob
 import os
 import re
 
-# skills/ 位于项目根（与 core/ 同级）
-SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills")
+# skills/ 位于项目根（与 core/ 同级）。
+# ⚠️ 冻结（PyInstaller onefile）时 __file__ 落在临时解压目录 _MEIPASS，进程退出即删除 →
+#    装进去的技能会「重启就丢」。因此允许 MINIYUXI_SKILLS_DIR 覆盖到持久目录；
+#    run.py 的 _frozen_bootstrap() 会在 import core 之前把它指到 <MiniYuxi>/skills
+#    并从内置技能播种一次。
+_DEFAULT_SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills")
+SKILLS_DIR = os.getenv("MINIYUXI_SKILLS_DIR") or _DEFAULT_SKILLS_DIR
 
 
 def _strip_quotes(v: str) -> str:
