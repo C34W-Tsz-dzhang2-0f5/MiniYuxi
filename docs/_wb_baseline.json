@@ -1,0 +1,177 @@
+{
+  "source": "C:\\Users\\Administrator\\AppData\\Local\\Programs\\WorkBuddyAI\\resources\\app.asar",
+  "asar_bytes": 296579386,
+  "nav_registry_raw": "nav: {\n\t\t\t\tdefaultSelected: \"home\",\n\t\t\t\titems: [\n\t\t\t\t\t{\n\t\t\t\t\t\tid: \"home\",\n\t\t\t\t\t\ttarget: \"builtin:new_task\",\n\t\t\t\t\t\ttitle: \"conversation.newTask\",\n\t\t\t\t\t\torder: 10,\n\t\t\t\t\t\tconfig: {\n\t\t\t\t\t\t\theader: {\n\t\t\t\t\t\t\t\tvisible: true,\n\t\t\t\t\t\t\t\ttitle: \"home.header.title\"\n\t\t\t\t\t\t\t},\n\t\t\t\t\t\t\tmodes: { defaultSelected: \"work\" }\n\t\t\t\t\t\t}\n\t\t\t\t\t},\n\t\t\t\t\t{\n\t\t\t\t\t\tid: \"claw\",\n\t\t\t\t\t\ttarget: \"builtin:claw\",\n\t\t\t\t\t\ttitle: \"conversation.claw.defaultName\",\n\t\t\t\t\t\torder: 20\n\t\t\t\t\t},\n\t\t\t\t\t{\n\t\t\t\t\t\tid: \"project\",\n\t\t\t\t\t\ttarget: \"builtin:project\",\n\t\t\t\t\t\ttitle: \"conversation.project\",\n\t\t\t\t\t\torder: 30\n\t\t\t\t\t},\n\t\t\t\t\t{\n\t\t\t\t\t\tid: \"market\",\n\t\t\t\t\t\ttarget: \"builtin:experts\",\n\t\t\t\t\t\ttitle: \"conversation.experts\",\n\t\t\t\t\t\torder: 40,\n\t\t\t\t\t\tchildren: [\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\tid: \"experts\",\n\t\t\t\t\t\t\t\ttarget: \"builtin:experts\",\n\t\t\t\t\t\t\t\ttitle: \"unifiedMarket.tab.experts\",\n\t\t\t\t\t\t\t\torder: 10\n\t\t\t\t\t\t\t},\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\tid: \"skills\",\n\t\t\t\t\t\t\t\ttarget: \"builtin:skills\",\n\t\t\t\t\t\t\t\ttitle: \"unifiedMarket.tab.skills\",\n\t\t\t\t\t\t\t\torder: 20,\n\t\t\t\t\t\t\t\tconfig: {\n\t\t\t\t\t\t\t\t\tdefaultTab: \"recommend\",\n\t\t\t\t\t\t\t\t\ttabs: [\n\t\t\t\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\t\t\tkind: \"builtin\",\n\t\t\t\t\t\t\t\t\t\t\tid: \"recommend\",\n\t\t\t\t\t\t\t\t\t\t\tvisible: true\n\t\t\t\t\t\t\t\t\t\t},\n\t\t\t\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\t\t\tkind: \"builtin\",\n\t\t\t\t\t\t\t\t\t\t\tid: \"skillhub\",\n\t\t\t\t\t\t\t\t\t\t\tvisible: true\n\t\t\t\t\t\t\t\t\t\t},\n\t\t\t\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\t\t\tkind: \"builtin\",\n\t\t\t\t\t\t\t\t\t\t\tid: \"plugins\",\n\t\t\t\t\t\t\t\t\t\t\tvisible: true\n\t\t\t\t\t\t\t\t\t\t},\n\t\t\t\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\t\t\tkind: \"builtin\",\n\t\t\t\t\t\t\t\t\t\t\tid: \"knot\",\n\t\t\t\t\t\t\t\t\t\t\tvisible: true\n\t\t\t\t\t\t\t\t\t\t},\n\t\t\t\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\t\t\tkind: \"builtin\",\n\t\t\t\t\t\t\t\t\t\t\tid: \"enterprise\",\n\t\t\t\t\t\t\t\t\t\t\tvisible: true\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t]\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t},\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\tid: \"connectors\",\n\t\t\t\t\t\t\t\ttarget: \"builtin:connectors\",\n\t\t\t\t\t\t\t\ttitle: \"unifiedMarket.tab.connectors\",\n\t\t\t\t\t\t\t\torder: 30\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t]\n\t\t\t\t\t},\n\t\t\t\t\t{\n\t\t\t\t\t\tid: \"automation\",\n\t\t\t\t\t\ttarget: \"builtin:automation\",\n\t\t\t\t\t\ttitle: \"conversation.automation\",\n\t\t\t\t\t\torder: 50\n\t\t\t\t\t},\n\t\t\t\t\t{\n\t\t\t\t\t\tid: \"space\",\n\t\t\t\t\t\ttarget: \"builtin:space\",\n\t\t\t\t\t\ttitle: \"conversation.space\",\n\t\t\t\t\t\torder: 70\n\t\t\t\t\t},\n\t\t\t\t\t{\n\t\t\t\t\t\tid: \"more\",\n\t\t\t\t\t\ttarget: \"builtin:more\",\n\t\t\t\t\t\ttitle: \"conversation.more\",\n\t\t\t\t\t\torder: 9e3,\n\t\t\t\t\t\tchildren: [\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\tid: \"my-files\",\n\t\t\t\t\t\t\t\ttarget: \"builtin:my_files\",\n\t\t\t\t\t\t\t\ttitle: \"conversation.myFiles\",\n\t\t\t\t\t\t\t\torder: 10\n\t\t\t\t\t\t\t},\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\tid: \"agent-mail\",\n\t\t\t\t\t\t\t\ttarget: \"builtin:agent_mail\",\n\t\t\t\t\t\t\t\ttitle: \"conversation.myMailbox\",\n\t\t\t\t\t\t\t\torder: 15\n\t\t\t\t\t\t\t},\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\tid: \"tencent-docs\",\n\t\t\t\t\t\t\t\ttarget: \"builtin:tencent_docs\",\n\t\t\t\t\t\t\t\ttitle: \"conversation.tencentDocs\",\n\t\t\t\t\t\t\t\torder: 20\n\t\t\t\t\t\t\t},\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\tid: \"ima\",\n\t\t\t\t\t\t\t\ttarget: \"builtin:ima\",\n\t\t\t\t\t\t\t\ttitle: \"conversation.ima\",\n\t\t\t\t\t\t\t\torder: 30\n\t\t\t\t\t\t\t},\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\tid: \"lexiang\",\n\t\t\t\t\t\t\t\ttarget: \"builtin:lexiang\",\n\t\t\t\t\t\t\t\ttitle: \"conversation.lexiang\",\n\t\t\t\t\t\t\t\torder: 40\n\t\t\t\t\t\t\t},\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\tid: \"inspiration\",\n\t\t\t\t\t\t\t\ttarget: \"builtin:inspiration\",\n\t\t\t\t\t\t\t\ttitle: \"conversation.inspiration\",\n\t\t\t\t\t\t\t\torder: 50\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t]\n\t\t\t\t\t}\n\t\t\t\t]\n\t\t\t}",
+  "sidebar_i18n_raw": "sidebar: {\n\t\t\"newChat\": \"New Chat\",\n\t\t\"recentChats\": \"Recent Chats\",\n\t\t\"loading\": \"Loading...\",\n\t\t\"noChats\": \"No chats yet\",\n\t\t\"untitledChat\": \"New Chat\",\n\t\t\"yesterday\": \"Yesterday\",\n\t\t\"daysAgo\": \"{{days}} days ago\",\n\t\t\"confirmDelete\": \"Are you sure you want to delete this chat?\",\n\t\t\"rename\": \"Rename\",\n\t\t\"delete\": \"Delete\",\n\t\t\"settings\": \"Settings\",\n\t\t\"loadError\": \"Failed to load, please retry\"\n\t}",
+  "shortcuts": [
+    {
+      "id": "newline",
+      "labelKey": "settings.keyboardShortcuts.actions.newline",
+      "category": "editing",
+      "scope": "context",
+      "win": "Shift+Enter",
+      "mac": "Shift+Enter"
+    },
+    {
+      "id": "search-in-conversation",
+      "labelKey": "settings.keyboardShortcuts.actions.searchInConversation",
+      "category": "editing",
+      "scope": "app",
+      "win": "Ctrl+F",
+      "mac": "Meta+F"
+    },
+    {
+      "id": "send-message",
+      "labelKey": "settings.keyboardShortcuts.actions.sendMessage",
+      "category": "editing",
+      "scope": "context",
+      "win": "Enter",
+      "mac": "Enter"
+    },
+    {
+      "id": "stop-generation",
+      "labelKey": "settings.keyboardShortcuts.actions.stopGeneration",
+      "category": "editing",
+      "scope": "context",
+      "win": "Escape",
+      "mac": "Escape"
+    },
+    {
+      "id": "toggle-voice-recording",
+      "labelKey": "settings.keyboardShortcuts.actions.toggleVoiceRecording",
+      "category": "editing",
+      "scope": "app",
+      "win": "Ctrl+D",
+      "mac": "Meta+D"
+    },
+    {
+      "id": "trigger-picker",
+      "labelKey": "settings.keyboardShortcuts.actions.triggerPicker",
+      "category": "editing",
+      "scope": "context",
+      "win": "@",
+      "mac": "@"
+    },
+    {
+      "id": "trigger-slash-command",
+      "labelKey": "settings.keyboardShortcuts.actions.triggerSlashCommand",
+      "category": "editing",
+      "scope": "context",
+      "win": "/",
+      "mac": "/"
+    },
+    {
+      "id": "font-size-decrease",
+      "labelKey": "settings.keyboardShortcuts.actions.fontSizeDecrease",
+      "category": "general",
+      "scope": "app",
+      "win": "Ctrl+-",
+      "mac": "Meta+-"
+    },
+    {
+      "id": "font-size-increase",
+      "labelKey": "settings.keyboardShortcuts.actions.fontSizeIncrease",
+      "category": "general",
+      "scope": "app",
+      "win": "Ctrl+=",
+      "mac": "Meta+="
+    },
+    {
+      "id": "font-size-reset",
+      "labelKey": "settings.keyboardShortcuts.actions.fontSizeReset",
+      "category": "general",
+      "scope": "app",
+      "win": "Ctrl+0",
+      "mac": "Meta+0"
+    },
+    {
+      "id": "new-conversation",
+      "labelKey": "settings.keyboardShortcuts.actions.newConversation",
+      "category": "navigation",
+      "scope": "app",
+      "win": "Ctrl+N",
+      "mac": "Meta+N"
+    },
+    {
+      "id": "next-task",
+      "labelKey": "settings.keyboardShortcuts.actions.nextTask",
+      "category": "navigation",
+      "scope": "app",
+      "win": "Ctrl+]",
+      "mac": "Meta+]"
+    },
+    {
+      "id": "prev-task",
+      "labelKey": "settings.keyboardShortcuts.actions.prevTask",
+      "category": "navigation",
+      "scope": "app",
+      "win": "Ctrl+[",
+      "mac": "Meta+["
+    },
+    {
+      "id": "open-settings",
+      "labelKey": "settings.keyboardShortcuts.actions.openSettings",
+      "category": "window",
+      "scope": "app",
+      "win": "Ctrl+,",
+      "mac": "Meta+,"
+    },
+    {
+      "id": "toggle-artifacts",
+      "labelKey": "settings.keyboardShortcuts.actions.toggleArtifacts",
+      "category": "window",
+      "scope": "app",
+      "win": "Ctrl+Shift+B",
+      "mac": "Meta+Shift+B"
+    },
+    {
+      "id": "toggle-fullscreen",
+      "labelKey": "settings.keyboardShortcuts.actions.toggleFullscreen",
+      "category": "window",
+      "scope": "app",
+      "win": "F11",
+      "mac": "Ctrl+Meta+F"
+    },
+    {
+      "id": "toggle-sidebar",
+      "labelKey": "settings.keyboardShortcuts.actions.toggleSidebar",
+      "category": "window",
+      "scope": "app",
+      "win": "Ctrl+B",
+      "mac": "Meta+B"
+    },
+    {
+      "id": "toggle-window",
+      "labelKey": "settings.keyboardShortcuts.actions.toggleWindow",
+      "category": "window",
+      "scope": "global",
+      "win": "Shift+Alt+W",
+      "mac": "Shift+Alt+W"
+    }
+  ],
+  "shortcut_count": 18,
+  "scene_label_hits": {
+    "幻灯片": 46,
+    "视频生成": 15,
+    "深度研究": 12,
+    "文档处理": 10,
+    "数据分析": 28,
+    "可视化": 43,
+    "金融服务": 9,
+    "产品管理": 9,
+    "设计": 1328,
+    "邮件编辑": 8,
+    "代码补全": 17,
+    "重构建议": 0,
+    "单元测试": 21,
+    "代码审查": 9,
+    "Bug 定位": 0,
+    "接口联调": 1,
+    "性能分析": 6,
+    "SQL 优化": 0
+  },
+  "session_restore_evidence": [
+    "d,\n\t\t\tisPlayground,\n\t\t\tresolveFilePath,\n\t\t\tsendPromptRequestWithQueue\n\t\t]);\n\t\t/**\n\t\t* 路由上下文，用于获取 URL 中的 taskId\n\t\t* 使用 Safe 版本以支持非路由环境（如 Widget 模式）\n\t\t*/\n\t\tconst router = useRouterContextSafe();\n\t\tconst [isRestoringSession, setIsRestoringSession] = (0, import_react.useState)((0, import_react.useRef)(() => {\n\t\t\tif (router?.params.taskId) return true;\n\t\t\treturn !!new URLSearchParams(window.location.search).get(\"sessionId\");\n\t\t}).current);\n\t\t(0, import_react.useE",
+    "((tab) => {\n\t\tif (!next.includes(tab)) next.push(tab);\n\t});\n\tif (next.length === tabs.length && next.every((tab, index) => tab.id === tabs[index]?.id)) return tabs;\n\treturn next;\n}\nfunction cloneTabs(tabs) {\n\treturn tabs.map((tab) => ({ ...tab }));\n}\nfunction restoreSessionTabs(resetKey) {\n\tif (resetKey === void 0) return [];\n\tconst cached = sessionTabsCache.get(resetKey);\n\tif (!cached) return [];\n\tsessionTabsCache.delete(resetKey);\n\tsessionTabsCache.set(resetKey, cached);\n\treturn filterTabsByOwner(cloneTabs(cached"
+  ]
+}

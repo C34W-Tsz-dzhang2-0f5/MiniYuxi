@@ -1,0 +1,57 @@
+{
+  "passed": [
+    "A1 未登录：登录入口可见",
+    "A2 错误口令：给出明确错误提示",
+    "A3 正确口令：登录成功并落 token",
+    "A4 刷新页面：登录态保持",
+    "A5 退出后重新登录：可再次登录",
+    "B 导航「新建」",
+    "B 导航「导入」",
+    "B 导航「知识库」",
+    "B 导航「HRM人事」",
+    "B 导航「流程」",
+    "B 导航「模型切换」",
+    "B 导航「成本管理」",
+    "B 导航「管理」",
+    "B 导航「岗位工作台」",
+    "B2 发送消息并收到回显",
+    "B4 主题切换（设置项）",
+    "B5 通知提示（Toast）可展示",
+    "C 页面切换均 < 1500ms",
+    "C 首屏可交互 < 5000ms",
+    "E 无 JS 运行时异常"
+  ],
+  "failed": [
+    {
+      "level": "P0",
+      "name": "B2 新建会话",
+      "extra": "Page.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"#btnNewChat\")\n    - locator resolved "
+    },
+    {
+      "level": "P1",
+      "name": "B3 刷新后会话数据持久化",
+      "extra": "刷新前 662 字符 / 刷新后 0 字符"
+    }
+  ],
+  "timings_ms": {
+    "首屏可交互": 309.4,
+    "导航·新建": 782.9,
+    "导航·导入": 762.1,
+    "导航·知识库": 797.2,
+    "导航·HRM人事": 793.5,
+    "导航·流程": 794.4,
+    "导航·模型切换": 764.8,
+    "导航·成本管理": 791.8,
+    "导航·管理": 779.2,
+    "导航·岗位工作台": 763.5,
+    "发送消息响应": 2640.3
+  },
+  "page_errors": [],
+  "console_errors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "http_errors": [
+    "POST http://127.0.0.1:61055/api/auth/login -> 401"
+  ]
+}
