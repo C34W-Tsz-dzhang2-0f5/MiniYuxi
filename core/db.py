@@ -158,6 +158,30 @@ def init_db(force_rebuild_vec: bool = False) -> None:
         """
     )
 
+    # 制度地图：知识库文档分类列（兼容旧库，列已存在则忽略）
+    try:
+        cur.execute("ALTER TABLE docs ADD COLUMN category TEXT NOT NULL DEFAULT ''")
+    except Exception:
+        pass
+
+    # 子 Agent 定义（用户级自定义；内置 read-only Explore 由 subagent.BUILTIN_AGENTS 提供）
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS subagents(
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT '',
+            system_prompt TEXT NOT NULL DEFAULT '',
+            tools TEXT NOT NULL DEFAULT '[]',
+            read_only INTEGER NOT NULL DEFAULT 0,
+            builtin INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        """
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_subagents_tenant ON subagents(tenant_id)")
+
     # 向量表：维度变更时重建（旧向量失效，需重新入库）
     if force_rebuild_vec:
         cur.execute("DROP TABLE IF EXISTS vec_chunks")
