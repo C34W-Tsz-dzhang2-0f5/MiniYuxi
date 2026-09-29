@@ -67,9 +67,21 @@ def main():
 
     # 5) 抽查一个技能正文能否被读到（= 能被注入对话）
     if disk_names:
-        probe = os.path.join(base, sorted(disk_names)[0]) if False else files[0]
         head = open(files[0], encoding="utf-8", errors="ignore").read()[:160].replace("\n", " ")
         print("[5] 抽查正文（%s）：%s…" % (os.path.relpath(files[0], proj), head))
+
+    # 6) 清场：E2E 不应在真实 skills/ 里留痕（否则技能列表会多出几十个幽灵技能）
+    #    需要保留现场时设 MINIYUXI_E2E_KEEP=1
+    if os.getenv("MINIYUXI_E2E_KEEP", "").strip().lower() in ("1", "true", "yes", "on"):
+        print("[6] 保留本次安装（MINIYUXI_E2E_KEEP=1）")
+    else:
+        r = requests.delete(BASE + "/api/skills/" + NAME, headers=h, timeout=120)
+        print("[6] DELETE /api/skills/%s -> %s %s" % (NAME, r.status_code, r.text[:160]))
+        left = glob.glob(os.path.join(base, "**", "SKILL.md"), recursive=True)
+        print("    清场后残留 SKILL.md = %d（期望 0）" % len(left))
+        if left:
+            print("    清理未彻底，请手工检查 %s" % base)
+            sys.exit(1)
     print("E2E_INSTALL_OK")
 
 

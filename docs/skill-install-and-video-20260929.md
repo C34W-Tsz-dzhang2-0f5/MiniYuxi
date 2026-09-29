@@ -205,3 +205,97 @@ POST /api/skills/install → path = C:\Users\ADMINI~1\AppData\Local\Temp\_MEI000
 
 **验证手法（无需真装机器）**：WiX `dark.exe -x <抽出目录> -o dump.wxs <msi>` 反编译看 File 表，
 再用抽出的 payload 在隔离 `MINIYUXI_DATA_DIR` 下独立运行 sidecar 打 `/api/health`。
+
+---
+
+## 补记 2（2026-09-29 · 对话内「装技能」闭环 + 集合仓库选择，已修）
+
+阿长反馈：**「对话框输入指令还是无法安装 skill」**（截图：输入
+`npx skills add https://github.com/vercel-labs/skills --skill find-skills`，模型只把命令解释了一遍）。
+
+### 根因分层
+
+| 层 | 问题 | 处理 |
+|---|---|---|
+| ① 能力缺失 | 技能安装只有「UI 抽屉」和 HTTP 接口两条入口，**没有注册成工具** → Agent Loop 工具清单里没有对应能力，模型只能解释 | 新增 `skill.install` / `skill.uninstall` / `skill.list` 三个工具 |
+| ② 提示缺失 | 系统提示没告诉模型「装技能要调工具、而不是解释命令」 | `_agent_system` 第 6 条 + 工具描述里的强制指令 |
+| ③ 命令形态 | `npx skills add <url> --skill <名>` 是**机器语法**，不该让 LLM 猜 | `_detect_tool` 加确定性快路径（在知识库闸门**之前**） |
+
+### D11 · `install_skill(skills_dir=X)` 却拿默认目录校验 → 误报 frontmatter 错并回滚
+
+**问题**：`core/skills_catalog` 的扫描函数原先**只认模块级 `SKILLS_DIR`**，
+而 `install_skill` 接受 `skills_dir=` 参数。于是「装到 X、却拿默认目录去校验」→
+`installed` 恒为空 → 抛 `SkillInstallError("SKILL.md 缺少合法 frontmatter")`
+**并把刚装好的技能 `rmtree` 掉**。
+
+**实测证据**（`vercel-labs/skills` 克隆体，38 个技能）：
+```
+install_skill("path", <clone>, "mattpocock-skills", skills_dir=tmp)
+  → SkillInstallError: SKILL.md 缺少合法 frontmatter（需 name + description）
+  → tmp/ 里只剩被回滚的空目录
+同一份代码改用环境变量隔离（catalog.SKILLS_DIR == tmp）→ ok=True, count=38
+```
+
+**决策**：`_scan_with_skips` / `list_skills` / `scan_skills` / `load_skill` 全部加
+`skills_dir=None` 参数；缓存键从 `mtime` 改为 `(目录绝对路径, mtime)`，允许对不同目录各缓存一份。
+`install_skill` / `uninstall_skill` 一律用**自己的 `SKILLS_DIR`** 去校验/解析。
+
+**顺带修的隐藏坑**：原校验用 `path.startswith(target_abs + os.sep)`。
+`SKILLS_DIR` 来自环境变量时是正斜杠、`glob` 返回的是反斜杠 → 在 Windows 上会误判「不在树内」。
+改用 `_same_tree()`（`normcase(abspath())` 双规范化后比较）。
+
+### D12 · 只读文件让 `rmtree` 静默留残留（卸载删不干净）
+
+**问题**：`git clone` 会把 `.git/objects/pack/*.pack|.idx` 标成只读（`-r--r--r--`）。
+Windows 上 `os.unlink` 直接 `PermissionError`；而旧代码用的是
+`shutil.rmtree(target, ignore_errors=True)` → **静默**留下半截目录。
+
+**实测证据**：
+```
+uninstall 后残留: <skills>/find-skills/.git/objects/pack/{pack,idx,rev}（共 7 个条目）
+只读位探测: -r--r--r--  pack-20d176b6….pack
+裸 rmtree: PermissionError（残留=True）; 清只读位后 rmtree: 残留=False
+```
+
+**决策**：
+- 新增 `_rmtree()`：**先裸删，失败再 `_clear_readonly()` 重试，最后才 `ignore_errors` 兜底**
+  （正常路径零额外开销，不做预扫描）。所有删除点（回滚 / 卸载 / staging 清理）统一走它。
+- staging 阶段**丢弃 `.git` / `__pycache__` / `*.pyc`**（`_STAGE_IGNORE`）：
+  技能只需要正文，版本库既没用又是删除失败的根源。`path` 走 copytree 的 ignore，
+  `url` clone 后在 stage 里补一次 `_rmtree(stage/.git)`。
+
+> ⚠️ **别用 `onexc=` / `onerror=` 版本的 rmtree**：实测在 Windows 上「吞错」模式会让
+> rmtree 退化到 ~0.4s/文件（198 文件 71s），而「先裸删、失败再清位」只要 ~1s。
+> 本沙箱里连**成功**的删除也是 ~0.2s/文件（C: / E: 都如此）——那是沙箱文件系统过滤器的特性，
+> 不是代码问题；在真机上是毫秒级。写测试时**别用大仓库做夹具**，用 2~3 个技能的小夹具。
+
+### D13 · `--skill <名>` 的语义：从集合仓库里**挑一个**，而不是容器名
+
+**问题**：旧实现把 `--skill` 的值当 `name`（容器目录名）→
+`npx skills add <仓库> --skill find-skills` 会**把整个仓库 38 个技能装进一个叫 `find-skills` 的容器**。
+而且 `vercel-labs/skills` 里**根本没有** `find-skills` 这个技能（该仓库实为 `mattpocock-skills`，
+`package.json` 可证），旧实现会「静默装错东西还报成功」。
+
+**决策**：
+- 新增独立参数 **`select`**（HTTP 层 `SkillInstallIn.select`，工具层 `skill.install.select`），
+  `--skill <名>` 映射到它，语义 = **只装集合仓库里的这一个**：
+  命中 → 把该子目录**平铺**装到 `SKILLS_DIR/<名>/`；未命中 → **明确报错并列出可用技能**（绝不静默整装）。
+- **`name` 语义保持不变**（容器名 / 单技能仓库的技能名覆盖），确保向后兼容：
+  现有 `install_skill("path", src, "mattpocock-skills")`、`("...", "coll")` 等调用与测试不受影响。
+- 附带好处：`name` 若恰好等于某个子技能名，也会自动走「只装那一个」——符合直觉且不破坏上述用例。
+
+### 本轮验收
+
+| 项 | 结果 |
+|---|---|
+| 新增自包含测试 | `tests/_verify_skill_tools.py` **65/65 PASS**（含 D11/D12/D13 回归） |
+| 既有技能测试 | `tests/_verify_skill_install_and_video.py` **49/49 PASS**（向后兼容未破） |
+| 真实命令行形态 | `npx skills add <本地集合仓库> --skill tdd` 经 `rag.answer` 端到端装到磁盘，且**只装那一个** |
+| e2e 清场 | `_e2e_install_github_skills.py` 补第 6 步：验完自动 `DELETE`，不在真实 `skills/` 留痕 |
+
+### 尚未闭环
+
+- 🔴 **装机版（MSI）不含本轮改动**：`C:\Program Files\MiniYuxi\` 里仍是 0.4.0 旧包，
+  对话里装技能要在**网页版**验证；装机版需重出 MSI（见 MEMORY 的 WiX 说明）。
+- 🟡 `vercel-labs/skills` 与 `mattpocock/skills` 是同一个仓库（前者为组织名下的镜像/转移），
+  文档与提示词里不要再把 `find-skills` 当成该仓库的技能名举例。
