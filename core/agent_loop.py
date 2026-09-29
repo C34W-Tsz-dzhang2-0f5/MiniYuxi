@@ -40,7 +40,8 @@ def _to_openai_tools(allowed_toolsets=None) -> list:
 
 
 def run(system: str, user_prompt: str, history: list | None = None,
-        tenant_id: str = None, memories: list | None = None, trace_id: str = None) -> dict | None:
+        tenant_id: str = None, memories: list | None = None, trace_id: str = None,
+        provider: str | None = None, model: str | None = None) -> dict | None:
     """执行自主循环。返回 {answer, mode, model, tool_calls_used, loop_trace, memories_used, trace_id}
     或 None（离线/网关失败，由 caller 退化）。
 
@@ -86,7 +87,8 @@ def run(system: str, user_prompt: str, history: list | None = None,
             circuit_open, circuit_reason = True, reason
             break
         with observability.span("llm", kind="llm", tenant_id=tenant_id) as lsp:
-            res = gateway.chat_with_tools(system, messages, tools, tenant_id=tenant_id)
+            res = gateway.chat_with_tools(system, messages, tools, tenant_id=tenant_id,
+                                          provider=provider, model=model)
         if not res["ok"]:
             lsp.set_status("offline")
             return None  # 网关失败（如限流）→ caller 退化
@@ -141,7 +143,7 @@ def run(system: str, user_prompt: str, history: list | None = None,
     result = {
         "answer": final_text,
         "mode": "agent",
-        "model": config.LLM_MODEL,
+        "model": model or config.LLM_MODEL,
         "tool_calls_used": used_tools,
         "loop_trace": loop_trace,
         "memories_used": bool(memories),

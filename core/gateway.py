@@ -119,7 +119,8 @@ def chat(system, prompt, history=None, provider=None, model=None, tenant_id=None
     return {"ok": True, "text": text, "err": "", "model": effective_model, "provider": "siliconflow", "usage": u}
 
 
-def chat_with_tools(system, messages, tools, history=None, provider=None, tenant_id=None) -> dict:
+def chat_with_tools(system, messages, tools, history=None, provider=None, tenant_id=None,
+                    model=None) -> dict:
     """支持 OpenAI function calling 的对话。messages 为不含 system 的完整消息列表
     （history + 用户提问 + 工具结果）。返回 {ok, text, tool_calls, err, usage}。
     - 若模型返回 tool_calls：tool_calls=[{name, arguments(dict), id}]
@@ -131,7 +132,7 @@ def chat_with_tools(system, messages, tools, history=None, provider=None, tenant
 
     full_msgs = [{"role": "system", "content": system}] + list(messages)
     payload = {
-        "model": config.LLM_MODEL,
+        "model": model or config.LLM_MODEL,
         "messages": full_msgs,
         "temperature": config.LLM_TEMPERATURE,
         "tools": tools,

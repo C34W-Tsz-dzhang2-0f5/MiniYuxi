@@ -408,6 +408,24 @@ def list_tools() -> list:
     return base
 
 
+def tool_inventory_text() -> str:
+    """可用工具的自然语言清单（供系统提示注入）。
+
+    与 function calling 的 schema 互补：schema 告诉模型「参数怎么填」，这里告诉它
+    「有哪些能力可用、必须真正调用」。缺了这一段，模型只会把工具当成给用户讲解的
+    命令——表现为「装技能装不了 / 写代码写不了」。
+    """
+    lines = []
+    try:
+        for t in list_tools():
+            desc = (t.get("description") or "").strip()
+            mark = "（需审批）" if t.get("requires_approval") else ""
+            lines.append(f"- {t.get('name')}：{desc}{mark}")
+    except Exception:
+        return ""
+    return "\n".join(lines)
+
+
 def init():
     try:
         conn = db.connect()

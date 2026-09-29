@@ -49,6 +49,8 @@ STEPS: list[tuple[str, list[str], tuple[str, ...], bool]] = [
      [PY, "tests/_verify_skill_install_and_video.py"], ("requests",), False),
     ("技能管理工具（对话内可安装/卸载）",
      [PY, "tests/_verify_skill_tools.py"], ("requests",), True),
+    ("主对话 Agent 工具链路（wb/chat 真正执行工具）",
+     [PY, "tests/_verify_wb_agent_tools.py"], (), True),
     ("对话内装技能（HTTP 级 e2e，自起服务）",
      [PY, "tests/_e2e_chat_skill_install.py"],
      ("fastapi", "requests", "uvicorn"), False),

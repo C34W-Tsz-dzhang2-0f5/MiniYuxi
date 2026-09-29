@@ -70,6 +70,25 @@ def _build_system_prompt(
             "当前模式：Agent。请主动分析任务、自主规划步骤、必要时调用工具完成目标，"
             "并在最后给出清晰结论。"
         )
+        # 工具清单 + 「必须真正调用」强制指令（2026-09-29 修）
+        # 此前只笼统说"必要时调用工具"却不列可用工具，模型无从调用，只能把命令讲给用户听
+        # ——直接表现为「装技能装不了 / 写代码写不了」。
+        try:
+            from . import tools_registry
+            inv = tools_registry.tool_inventory_text()
+            if inv:
+                parts.append(
+                    "【可用工具】下列工具你必须**真正调用**来完成任务，"
+                    "绝不要只把命令/代码讲给用户、或给出让用户自己去执行的手工步骤：\n"
+                    + inv +
+                    "\n【执行纪律】\n"
+                    "1. 用户要求安装/卸载/查看技能 → 必须调用 skill.install / skill.uninstall / skill.list；\n"
+                    "2. 若用户粘贴 `npx skills add <仓库地址> --skill <名字>` 这类命令行，"
+                    "取仓库地址为 source、`--skill` 后的值为 select，再调用 skill.install；\n"
+                    "3. 工具返回错误或「仓库中不存在该名字」时，原样转达工具返回内容，不要改口说已完成。"
+                )
+        except Exception:
+            pass
 
     if not allow_full_access:
         parts.append(
@@ -256,28 +275,60 @@ def chat(tenant_id: str, message: str, scene: str = "",
     ok = False
     err = ""
     routed = None
-    try:
-        if model_id or strategy:
-            # 走多模型中枢：手动指定优先，否则按策略自动路由
-            from . import model_hub
-            routed = model_hub.route(message, strategy) if not model_id else \
-                {"model_id": model_id, "model_name": model_id, "task_type": model_hub.classify(message)["task_type"],
-                 "name": model_hub.classify(message)["name"], "reason": "手动指定"}
-            r = model_hub.chat(routed["model_id"], system, prompt, history or [], tenant_id) or {}
-            ok = bool(r.get("ok"))
-            reply = (r.get("text") or "").strip()
-            err = r.get("err") or ""
-            routed = {**routed, "latency_ms": r.get("latency_ms", 0),
-                      "cost": r.get("cost", 0), "tokens": r.get("tokens", 0),
-                      "model_name": r.get("model_name", routed.get("model_name", ""))}
-        else:
-            r = rag.llm_chat(system, prompt, history=history or [], tenant_id=tenant_id,
-                             provider=provider, model=model) or {}
-            ok = bool(r.get("ok"))
-            reply = (r.get("text") or "").strip()
-            err = r.get("err") or ""
-    except Exception as e:  # 任何异常都降级，不把 500 抛给前端
-        ok, reply, err = False, "", f"{type(e).__name__}: {e}"
+    tool_calls_used: list = []
+    loop_trace: list = []
+    trace_id = None
+
+    # ① Agent 模式：走自主 Agent Loop（function calling，真正执行工具）
+    #    2026-09-29 修：此前本函数只做「单次 LLM 生成」，工具从未被执行，
+    #    于是装技能 / 写代码等一切工具能力都表现为"做不到"。
+    if (mode or "agent").lower() == "agent":
+        try:
+            from . import agent_loop
+            _mid = model_id or ""
+            if not _mid:
+                try:
+                    from . import model_hub
+                    _mid = model_hub.route(message, strategy).get("model_id", "")
+                except Exception:
+                    _mid = ""
+            ares = agent_loop.run(system, prompt, history or [], tenant_id=tenant_id,
+                                  provider=provider, model=(model or _mid or None))
+        except Exception:
+            ares = None
+        if ares is not None:
+            reply = (ares.get("answer") or "").strip()
+            ok = bool(reply)
+            routed = {"model_id": ares.get("model", ""), "model_name": ares.get("model", ""),
+                      "reason": "agent loop（可调用工具）", "latency_ms": 0, "cost": 0, "tokens": 0}
+            tool_calls_used = ares.get("tool_calls_used") or []
+            loop_trace = ares.get("loop_trace") or []
+            trace_id = ares.get("trace_id")
+
+    # ② 退化路径：单次 LLM 生成（非 agent 模式 / agent 循环不可用或未产出）
+    if not ok:
+        try:
+            if model_id or strategy:
+                # 走多模型中枢：手动指定优先，否则按策略自动路由
+                from . import model_hub
+                routed = model_hub.route(message, strategy) if not model_id else \
+                    {"model_id": model_id, "model_name": model_id, "task_type": model_hub.classify(message)["task_type"],
+                     "name": model_hub.classify(message)["name"], "reason": "手动指定"}
+                r = model_hub.chat(routed["model_id"], system, prompt, history or [], tenant_id) or {}
+                ok = bool(r.get("ok"))
+                reply = (r.get("text") or "").strip()
+                err = r.get("err") or ""
+                routed = {**routed, "latency_ms": r.get("latency_ms", 0),
+                          "cost": r.get("cost", 0), "tokens": r.get("tokens", 0),
+                          "model_name": r.get("model_name", routed.get("model_name", ""))}
+            else:
+                r = rag.llm_chat(system, prompt, history=history or [], tenant_id=tenant_id,
+                                 provider=provider, model=model) or {}
+                ok = bool(r.get("ok"))
+                reply = (r.get("text") or "").strip()
+                err = r.get("err") or ""
+        except Exception as e:  # 任何异常都降级，不把 500 抛给前端
+            ok, reply, err = False, "", f"{type(e).__name__}: {e}"
 
     degraded = not ok or not reply
     if degraded:
@@ -291,7 +342,8 @@ def chat(tenant_id: str, message: str, scene: str = "",
 
     log_event(tenant_id, "chat", scene, {"len": len(message), "ok": ok, "src": len(sources), "mode": mode})
     return {"ok": ok, "reply": reply, "sources": sources, "degraded": degraded, "err": err,
-            "mode": mode, "routed": routed}
+            "mode": mode, "routed": routed, "tool_calls_used": tool_calls_used,
+            "loop_trace": loop_trace, "trace_id": trace_id}
 
 
 def stats(tenant_id: str = "default") -> dict:
