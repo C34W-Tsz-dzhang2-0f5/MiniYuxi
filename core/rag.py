@@ -138,24 +138,39 @@ def _ghost_numbers(answer: str, context: str) -> list[str]:
 
 # ---------------- 工具快路径（仅显式前缀）----------------
 def _detect_tool(question: str):
-    """仅识别显式 'tool:' 前缀（用户主动指定工具），返回 (name, args) 或 None。
+    """识别两类「用户已明确指定工具」的快路径，返回 (name, args) 或 None。
 
-    设计转变：自然语言意图（如"现在几点""算100+200"）不再手写正则猜测，
-    全部交给自主 Agent Loop（rag.agent_loop.run）由 LLM 自己决策调哪些工具、几步完成。
-    显式前缀保留为"用户主动指定"的快路径。
+    ① 显式 'tool:' 前缀（用户主动指定工具）；
+    ② 明确的**命令行语法** `npx skills add <仓库> [--skill <名>]`（2026-09-29 补）：
+       这是机器语法、不是自然语言意图——识别它不属于「手写正则猜意图」，而是让用户
+       粘贴的安装命令**确定性生效**：既不依赖模型是否愿意调工具，也不受知识库是否命中影响
+       （自然语言那条路要先过「无命中直接兜底」闸门，命令行这条在闸门之前）。
+
+    自然语言意图（"现在几点""帮我装这个技能"）仍全部交给自主 Agent Loop 由 LLM 决策，
+    不在这里做正则猜测。
     """
     q = (question or "").strip()
-    if not q.startswith("tool:"):
-        return None
-    parts = q[5:].split(None, 1)
-    name = parts[0]
-    args = {}
-    if len(parts) > 1:
-        for kv in re.split(r"[,\s]+", parts[1]):
-            if "=" in kv:
-                k, v = kv.split("=", 1)
-                args[k] = v
-    return (name, args)
+    if q.startswith("tool:"):
+        parts = q[5:].split(None, 1)
+        name = parts[0]
+        args = {}
+        if len(parts) > 1:
+            for kv in re.split(r"[,\s]+", parts[1]):
+                if "=" in kv:
+                    k, v = kv.split("=", 1)
+                    args[k] = v
+        return (name, args)
+
+    # ② `npx skills add <url|path> [--skill <name>]`（vercel-labs skills CLI 形态）
+    m = re.search(r"\bnpx\s+skills\s+add\s+([^\s'\"`]+)", q, re.I)
+    if m:
+        args = {"source": m.group(1).strip("'\"`")}
+        mf = re.search(r"--skill[=\s]+([^\s'\"`]+)", q, re.I)
+        if mf:
+            # --skill <名> 是「从集合仓库里挑一个装」→ 映射到 select（不是容器名 name）
+            args["select"] = mf.group(1).strip("'\"`")
+        return ("skill.install", args)
+    return None
 
 
 def _run_tool(tenant_id, name, args):
@@ -324,17 +339,23 @@ def _agent_system(context: str, n_hits: int) -> str:
 
     橙皮书 Agent Skills 落地：在系统提示末尾追加【可用技能清单】段（指令层 Skill 注册表
     自动注入），让 LLM 知道平台沉淀了哪些"工作手册"可按 trigger 调用。学 Hermes——
-    仅作追加段，不改动上方 5 条能力主结构，保持 system prompt 主干干净。
+    仅作追加段，不改动上方 6 条能力主结构，保持 system prompt 主干干净。
     """
     base = (
         "你是 MiniYuxi 企业级 AI Agent 平台的智能助手，具备自主规划与工具调用能力。\n"
         "【你的能力】\n"
         "1. 可自主调用工具完成任务（无需用户提醒）：calc 计算、current_time 获取当前时间、"
-        "kb_search 检索企业知识库、web_search 联网搜索实时信息、count_docs 统计知识库文档数。\n"
+        "kb_search 检索企业知识库、web_search 联网搜索实时信息、count_docs 统计知识库文档数、"
+        "skill.install 安装技能、skill.uninstall 卸载技能、skill.list 查看已装技能。\n"
         "2. 遇到多步任务，先想清楚步骤，再依次调用工具逐步完成，最后综合给出答案（ReAct 循环）。\n"
         "3. 优先依据下方【知识库资料】与工具返回结果作答；资料未涉及的要明说「资料未提及」，不得凭空编造。\n"
         "4. 凡涉及数字、天数、金额、期限、比例、百分比，必须逐字照抄来源，禁止换算/四舍五入/概括/推测。\n"
         "5. 回答中用 [编号] 标注资料来源；若多来源冲突，列出冲突并说明各出自哪条。\n"
+        "6. 用户要求「安装技能 / 卸载技能」时，**必须调用 skill.install / skill.uninstall 真正执行**，"
+        "而不是解释命令或给出手工步骤。若用户粘贴的是 `npx skills add <仓库地址> --skill <名字>` 这类命令行，"
+        "请从中取出仓库地址作为 source、`--skill` 后面的值作为 **select**（select 表示「只装集合仓库里的"
+        "这一个技能」），然后调用工具；若该仓库不存在这个名字，工具会返回可用技能列表，"
+        "请把列表原样转达给用户，不要改口说「已安装」。\n"
     )
     # 指令层 Skill 注入（橙皮书 Agent Skills）：可用技能清单作为追加段
     try:

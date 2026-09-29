@@ -759,13 +759,15 @@ from core import skills_install as skill_install_core
 class SkillInstallIn(BaseModel):
     method: str = "paste"          # paste | path | url
     value: str = ""                # 内容 / 本地路径 / https URL（git 或 zip）
-    name: str = ""                 # 可选覆盖名
+    name: str = ""                 # 可选覆盖名 / 集合仓库容器名
+    select: str = ""               # 可选：只装集合仓库里的某一个技能（对应 --skill <名>）
 
 
 @app.post("/api/skills/install")
 def skills_install(body: SkillInstallIn, p: auth.Principal = Depends(need("agent.run"))):
     try:
-        return skill_install_core.install_skill(body.method, body.value, body.name)
+        return skill_install_core.install_skill(body.method, body.value, body.name,
+                                                select=body.select)
     except skill_install_core.SkillInstallError as e:
         raise HTTPException(400, str(e))
 

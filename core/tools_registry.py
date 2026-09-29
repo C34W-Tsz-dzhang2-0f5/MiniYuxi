@@ -622,3 +622,121 @@ def _video_generate(tenant_id=None, **args):
         return res or {}
     except Exception as e:
         return {"error": "视频生成调用失败：" + str(e)[:200]}
+
+
+# ---------------- 技能管理（T6 闭环 · 对话内可执行）----------------
+#  背景（2026-09-29 阿长反馈）：技能安装此前只有「UI 抽屉」和 HTTP 接口两条入口，
+#  **没有注册成工具** → 用户在对话框里说「装这个技能 / npx skills add <url>」时，
+#  Agent Loop 的工具清单里根本没有对应能力，模型只能把命令"解释"一遍，不会真的执行。
+#  这里把 core/skills_install 的三件事暴露成工具，让「自然语言 → 真执行」闭环成立。
+#
+#  审批门：与 web_search 同款 env 开关，默认关闭（保持自动化流畅）；
+#  设 MINIYUXI_APPROVE_SKILL_INSTALL=1 后每次装/卸都挂 HITL 审批卡（企业管控场景）。
+#  注：技能正文只作提示词注入、**不执行代码**（见 core/wb_workbench.py），
+#      且 install_skill 内部已过 core.security（hardline / 危险命令 / 路径越界）+ 仅收 https。
+_SKILL_APPROVAL = os.getenv("MINIYUXI_APPROVE_SKILL_INSTALL", "").strip().lower() in (
+    "1", "true", "yes", "on",
+)
+
+
+def _guess_skill_method(source: str) -> str:
+    """把「来源字符串」判成 install_skill 需要的 method：url / path / paste。
+
+    判定顺序很重要：先看像不像链接，再看本地目录，最后才当正文——
+    否则一段含 'http' 的 SKILL.md 正文会被误判成 URL。
+    """
+    s = (source or "").strip()
+    low = s.lower()
+    if low.startswith("http://") or low.startswith("https://") or low.startswith("github.com/") \
+            or low.endswith(".git") or low.startswith("git@"):
+        return "url"
+    if os.path.isdir(s):
+        return "path"
+    return "paste"
+
+
+@tool(
+    "skill.install",
+    "安装技能（SKILL.md）到平台，让 Agent 获得新的工作手册/能力。"
+    "触发场景：用户给出 GitHub 仓库地址、本地文件夹路径、或直接粘贴 SKILL.md 内容并要求「装/安装/添加技能」；"
+    "也用于把 `npx skills add <仓库地址> --skill <名字>` 这类命令真正执行掉"
+    "（此时 source=仓库地址，select=--skill 后面的名字）。"
+    "**用户要求安装技能时必须调用本工具执行，不要只解释命令或给出手工步骤。**",
+    {"type": "object",
+     "properties": {
+         "source": {"type": "string",
+                    "description": "技能来源：https 仓库地址（如 https://github.com/owner/repo）、"
+                                   "本地文件夹绝对路径、或 SKILL.md 全文"},
+         "name": {"type": "string",
+                  "description": "技能名（可选，仅字母数字_-.）。单个技能仓库用它覆盖 SKILL.md 里的 name；"
+                                 "集合仓库（根目录无 SKILL.md）且未指定 select 时，用作容器目录名"},
+         "select": {"type": "string",
+                    "description": "只安装集合仓库里的某一个技能（可选，仅字母数字_-.）。"
+                                   "对应 `npx skills add <仓库> --skill <名字>` 里的 --skill 值；"
+                                   "命中则只装那一个，未命中会返回可用技能列表"},
+         "method": {"type": "string", "enum": ["auto", "url", "path", "paste"],
+                    "description": "来源类型；默认 auto 自动判断"},
+     },
+     "required": ["source"]},
+    "skills", requires_approval=_SKILL_APPROVAL,
+)
+def _skill_install(source="", name="", select="", method="auto", tenant_id=None, **_):
+    src = (source or "").strip()
+    if not src:
+        return {"error": "缺少 source 参数：请给出仓库地址 / 本地路径 / SKILL.md 内容"}
+    m = (method or "auto").strip().lower()
+    if m not in ("url", "path", "paste"):
+        m = _guess_skill_method(src)
+    try:
+        from . import skills_install
+        res = skills_install.install_skill(m, src, (name or "").strip(),
+                                           select=(select or "").strip())
+        if isinstance(res, dict) and res.get("ok"):
+            res = dict(res)
+            res["note"] = ("已安装并刷新技能目录，Agent 下一轮即可按 trigger 使用。"
+                           "若该仓库是集合仓库（根目录无 SKILL.md），未指定 select 时整个仓库会"
+                           "作为一个容器装入，其中的技能会被递归识别；"
+                           "指定 select 时只装选中的那一个。")
+        return res
+    except Exception as e:  # SkillInstallError 也在此收敛为 error 字典，不抛栈
+        return {"error": "技能安装失败：" + str(e)[:300]}
+
+
+@tool(
+    "skill.uninstall",
+    "卸载已安装的技能（按技能名删除）。触发场景：用户说「卸载/删除/移除技能 xxx」。"
+    "**必须调用本工具执行，不要只给出手工步骤。**",
+    {"type": "object",
+     "properties": {"name": {"type": "string", "description": "要卸载的技能名"}},
+     "required": ["name"]},
+    "skills", requires_approval=_SKILL_APPROVAL,
+)
+def _skill_uninstall(name="", tenant_id=None, **_):
+    nm = (name or "").strip()
+    if not nm:
+        return {"error": "缺少 name 参数：请给出要卸载的技能名"}
+    try:
+        from . import skills_install
+        return skills_install.uninstall_skill(nm)
+    except Exception as e:
+        return {"error": "技能卸载失败：" + str(e)[:300]}
+
+
+@tool(
+    "skill.list",
+    "列出平台已安装的技能（名称 + 一句话说明）。触发场景：用户问「有哪些技能 / 装了哪些技能 / 技能列表」。",
+    {"type": "object", "properties": {}}, "skills",
+)
+def _skill_list(tenant_id=None, **_):
+    try:
+        from . import skills_catalog
+        items = [s for s in skills_catalog.list_skills() if s.get("name")]
+        if not items:
+            return {"result": "当前没有已安装的技能。可用 skill.install 从 GitHub 仓库或本地路径安装。"}
+        lines = [f"- {s.get('name')}：{(s.get('description') or '').strip()[:60]}" for s in items[:80]]
+        head = f"共 {len(items)} 个技能"
+        if len(items) > 80:
+            head += "（仅列出前 80 个）"
+        return {"result": head + "：\n" + "\n".join(lines)}
+    except Exception as e:
+        return {"error": "读取技能列表失败：" + str(e)[:200]}
