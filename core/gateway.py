@@ -16,8 +16,15 @@ MAX_HISTORY_CHARS = 800
 MAX_RETRIES = 3  # 瞬断重试（429/5xx/timeout），避免一次 API 抖动就让整轮 agent 退化
 
 
-def _post_with_retry(payload: dict):
-    """POST 到 /chat/completions，瞬断自动重试；返回 (resp, None) 或 (None, err_str)。"""
+def _post_with_retry(payload: dict, tenant_id=None):
+    """POST 到 /chat/completions，瞬断自动重试；返回 (resp, None) 或 (None, err_str)。
+
+    出境闸门收口：本函数是 gateway 唯一的出网口（chat / chat_with_tools 都经此），
+    在发请求前过 egress.guard，被拒则直接返回 egress_denied 交由上层走离线兜底。
+    """
+    from . import egress
+    if egress.blocked("llm", config.LLM_BASE_URL, payload, tenant_id=tenant_id):
+        return None, "egress_denied"
     last_err = ""
     for attempt in range(MAX_RETRIES):
         try:
@@ -91,7 +98,7 @@ def chat(system, prompt, history=None, provider=None, model=None, tenant_id=None
         "model": effective_model,
         "messages": _messages(system, prompt, history),
         "temperature": config.LLM_TEMPERATURE,
-    })
+    }, tenant_id)
     if resp is None:
         usage.record(tenant_id, "llm", "offline", prompt_text=prompt, completion_text="")
         return {"ok": False, "text": "", "err": err, "model": effective_model, "provider": "siliconflow", "usage": None}
@@ -130,7 +137,7 @@ def chat_with_tools(system, messages, tools, history=None, provider=None, tenant
         "tools": tools,
         "tool_choice": "auto",
     }
-    resp, err = _post_with_retry(payload)
+    resp, err = _post_with_retry(payload, tenant_id)
     if resp is None:
         usage.record(tenant_id, "llm", "offline", prompt_text=str(messages), completion_text="")
         return {"ok": False, "text": "", "err": err, "tool_calls": [], "usage": None}
@@ -162,12 +169,16 @@ def chat_stream(system, prompt, history=None, provider=None, tenant_id=None):
     """生成器：逐 token 产出字符串（SSE 用）。无 Key / 异常时不产出（上层走离线兜底）。"""
     if provider == OFFLINE_ID or not config.llm_enabled():
         return
+    from . import egress
+    payload = {"model": config.LLM_MODEL, "messages": _messages(system, prompt, history),
+               "temperature": config.LLM_TEMPERATURE, "stream": True}
+    if egress.blocked("llm", config.LLM_BASE_URL, payload, tenant_id=tenant_id):
+        return  # 出境被拒 → 不产出，上层降级为离线兜底
     try:
         resp = requests.post(
             f"{config.LLM_BASE_URL.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {config.LLM_API_KEY}"},
-            json={"model": config.LLM_MODEL, "messages": _messages(system, prompt, history),
-                  "temperature": config.LLM_TEMPERATURE, "stream": True},
+            json=payload,
             stream=True, timeout=config.LLM_TIMEOUT,
         )
         resp.raise_for_status()

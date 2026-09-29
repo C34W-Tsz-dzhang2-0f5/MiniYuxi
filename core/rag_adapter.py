@@ -19,6 +19,11 @@ import core.rag as rag  # 原生 RAG，作为降级兜底
 
 
 def _http_post(url: str, payload: dict, headers: dict, timeout: int = 30) -> dict:
+    # 出境闸门：外部 RAG 平台（RAGFlow / FastGPT）会把用户问题 + 知识库片段发到第三方。
+    # 被拒 → 抛错，由 ask() 统一降级回原生 RAG（既有降级路径，无需新增分支）。
+    from . import egress
+    if egress.blocked("external_rag", url, payload):
+        raise RuntimeError("egress_denied: 外部 RAG 出境被策略拒绝")
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as resp:

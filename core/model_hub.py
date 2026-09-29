@@ -360,22 +360,26 @@ def chat(model_id: str, system: str, prompt: str, history=None, tenant_id: str =
     }
     t0 = time.time()
     text, err, u = "", "", None
-    try:
-        resp = requests.post(
-            f"{cf['base_url'].rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {cf['api_key']}", "Content-Type": "application/json"},
-            json=payload, timeout=DEFAULT_TIMEOUT,
-        )
-        if resp.status_code >= 400:
-            err = f"HTTP {resp.status_code}: {(resp.text or '')[:160]}"
-        else:
-            js = resp.json()
-            text = (js.get("choices") or [{}])[0].get("message", {}).get("content") or ""
-            u = js.get("usage")
-    except requests.exceptions.Timeout:
-        err = "timeout"
-    except Exception as e:
-        err = f"{type(e).__name__}: {e}"[:200]
+    from . import egress
+    if egress.blocked("llm", cf.get("base_url", ""), payload, tenant_id=tenant_id):
+        err = "egress_denied"  # 出境被拒 → 不发起请求，返回空结果由上层降级
+    else:
+        try:
+            resp = requests.post(
+                f"{cf['base_url'].rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {cf['api_key']}", "Content-Type": "application/json"},
+                json=payload, timeout=DEFAULT_TIMEOUT,
+            )
+            if resp.status_code >= 400:
+                err = f"HTTP {resp.status_code}: {(resp.text or '')[:160]}"
+            else:
+                js = resp.json()
+                text = (js.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+                u = js.get("usage")
+        except requests.exceptions.Timeout:
+            err = "timeout"
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"[:200]
     ms = int((time.time() - t0) * 1000)
 
     pt = (u or {}).get("prompt_tokens") or 0

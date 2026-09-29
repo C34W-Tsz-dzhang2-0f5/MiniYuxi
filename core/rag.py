@@ -85,6 +85,11 @@ def parse_file(path: str | Path) -> str:
 def embed(texts: list[str]) -> list[list[float]] | None:
     if not config.emb_enabled() or not texts:
         return None
+    # 出境闸门：embedding 发出去的是**文档原文切片**，是本系统最敏感的一类载荷。
+    # 被拒 → 返回 None，调用方自动降级为纯 BM25/FTS5 检索（不崩链路）。
+    from . import egress
+    if egress.blocked("embedding", config.EMB_BASE_URL, texts):
+        return None
     try:
         resp = requests.post(
             f"{config.EMB_BASE_URL.rstrip('/')}/embeddings",
@@ -168,7 +173,7 @@ def _run_tool(tenant_id, name, args):
 
 
 # ---------------- 入库 ----------------
-def add_document(tenant_id: str, title: str, text: str, source: str = "") -> dict:
+def add_document(tenant_id: str, title: str, text: str, source: str = "", category: str = "") -> dict:
     conn = db.connect()
     doc_id = f"doc-{uuid.uuid4().hex[:12]}"
     chunks = split_text(text)
@@ -180,8 +185,8 @@ def add_document(tenant_id: str, title: str, text: str, source: str = "") -> dic
 
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO docs(id,tenant_id,title,source,n_chunks) VALUES(?,?,?,?,?)",
-        (doc_id, tenant_id, title, source, len(chunks)),
+        "INSERT INTO docs(id,tenant_id,title,source,n_chunks,category) VALUES(?,?,?,?,?,?)",
+        (doc_id, tenant_id, title, source, len(chunks), category or ""),
     )
     for i, ch in enumerate(chunks):
         uid = f"{doc_id}-{i}"
@@ -218,7 +223,7 @@ def delete_document(tenant_id: str, doc_id: str) -> int:
 
 def list_documents(tenant_id: str) -> list[dict]:
     rows = db.connect().execute(
-        "SELECT id,title,source,n_chunks,created_at FROM docs WHERE tenant_id=? ORDER BY created_at DESC",
+        "SELECT id,title,source,n_chunks,created_at,category FROM docs WHERE tenant_id=? ORDER BY created_at DESC",
         (tenant_id,),
     ).fetchall()
     return [dict(r) for r in rows]
@@ -229,7 +234,7 @@ def get_document_text(tenant_id: str, doc_id: str, max_chars: int = 8000) -> str
     try:
         conn = db.connect()
         rows = conn.execute(
-            "SELECT text FROM chunks WHERE tenant_id=? AND doc_id=? ORDER BY idx",
+            "SELECT text FROM chunks WHERE tenant_id=? AND doc_id=? ORDER BY seq",
             (tenant_id, doc_id),
         ).fetchall()
         text = "\n".join(r["text"] for r in rows)
@@ -367,7 +372,7 @@ def answer(tenant_id: str, question: str, top_k: int = 5, history: list | None =
           对话摘要持久化到服务端记忆（T3），关键经验沉淀 skills（T6）。
     """
     hits = search(tenant_id, question, top_k)
-    citations = [{"title": h["title"], "text": h["text"][:200], "score": h["score"]} for h in hits]
+    citations = [{"doc_id": h["doc_id"], "title": h["title"], "text": h["text"][:200], "score": h["score"]} for h in hits]
 
     # 坑2 防护（360 七坑）：legal/labor 意图且未命中知识库 → 硬闸门拒绝自由生成法条
     block = citation_gate.evaluate(question, hits)

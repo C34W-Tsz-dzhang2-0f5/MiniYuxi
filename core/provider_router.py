@@ -85,7 +85,12 @@ def _enabled_ordered(conn):
     return [dict(r) for r in rows]
 
 
-def _post(payload: dict, prov: dict):
+def _post(payload: dict, prov: dict, tenant_id=None):
+    # 出境闸门：多供应商故障转移会依次打到不同 base_url，每一次都须过闸（否则
+    # 「切一个供应商就绕过管控」）。被拒 → 视为该供应商失败，继续走下一个/离线兜底。
+    from . import egress
+    if egress.blocked("llm", prov.get("base_url", ""), payload, tenant_id=tenant_id):
+        return None, "egress_denied"
     last = ""
     for attempt in range(MAX_RETRIES):
         try:
@@ -141,7 +146,7 @@ def chat(system, prompt, history=None, provider_id=None, tenant_id=None, conn=No
         if llm_fn is not None:
             text, err = llm_fn(p, payload)
         else:
-            resp, err = _post(payload, p)
+            resp, err = _post(payload, p, tenant_id)
             if resp is None:
                 continue
             text = resp.json()["choices"][0]["message"]["content"]

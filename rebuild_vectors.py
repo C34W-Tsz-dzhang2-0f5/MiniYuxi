@@ -66,6 +66,16 @@ def embed_with_retry(texts, max_retry: int = 8):
 
 
 def main():
+    # 出境闸门：本脚本会**批量把知识库文档原文**发去 embedding 接口，是出境面里
+    # 载荷最敏感的一处，必须与在线路径同受「数据出境」策略约束（不能因为它是离线
+    # 脚本就绕过管控）。被拒 → 直接退出，不发起任何请求。
+    from core import egress
+    if egress.blocked("embedding", config.EMB_BASE_URL,
+                      "rebuild_vectors：批量重建向量索引（发送 chunks 原文）"):
+        print("出境被拒绝：embedding 类出境已被数据出境策略关闭。")
+        print("请管理员调整「数据出境」策略（或设 MINIYUXI_EGRESS_EMBEDDING=allow）后重试。")
+        sys.exit(2)
+
     conn = sqlite3.connect(config.DB_PATH)
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)
