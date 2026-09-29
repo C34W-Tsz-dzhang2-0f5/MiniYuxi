@@ -16,7 +16,7 @@ import time
 import requests
 from . import db
 
-KINDS = ("wecom", "wechat", "crm", "erp", "feishu")
+KINDS = ("wecom", "wechat", "crm", "erp", "feishu", "mcp")
 
 
 def init(conn=None):
@@ -67,7 +67,10 @@ def health(conn=None):
     for r in c.execute("SELECT * FROM connectors").fetchall():
         d = dict(r)
         cfg = json.loads(d["config_json"] or "{}")
-        if cfg.get("endpoint") and cfg.get("token"):
+        if d["kind"] == "mcp":
+            # MCP 连接器：SSE 地址就绪即 ready（token 可走 Authorization 头，非必填）
+            status = "ready" if cfg.get("endpoint") else "not_configured"
+        elif cfg.get("endpoint") and cfg.get("token"):
             status = "ready"
         elif cfg.get("endpoint"):
             status = "partial"
@@ -87,12 +90,24 @@ def send_message(cid, target, text, conn=None):
     d = _config(cid, conn)
     if not d:
         return {"ok": False, "status": "unknown_connector", "cid": cid}
+    if d["kind"] == "mcp":
+        # MCP 类型连接器由 mcp_client 经 SSE 处理工具调用，不走此信封
+        return {"ok": False, "status": "not_applicable", "cid": cid,
+                "hint": "mcp 类型连接器由 mcp_client 经 SSE 处理，不走 send_message 信封"}
+    if not d:
+        return {"ok": False, "status": "unknown_connector", "cid": cid}
     cfg = json.loads(d["config_json"] or "{}")
     if not d["enabled"]:
         return {"ok": False, "status": "disabled", "cid": cid}
     if not (cfg.get("endpoint") and cfg.get("token")):
         return {"ok": False, "status": "not_configured", "cid": cid,
                 "hint": "在 config.endpoint / config.token 填入厂商凭证后可真正发送"}
+    # 出境闸门：消息正文 + 收件人发往外部业务系统（企微/CRM/ERP/飞书）。
+    # 被拒 → 返回 egress_denied，不发起请求、不崩链路。
+    from . import egress
+    if egress.blocked("connector", cfg["endpoint"], {"target": target, "text": text}):
+        return {"ok": False, "status": "egress_denied", "cid": cid,
+                "hint": "数据出境策略拒绝了本次外发（connector 类）。请管理员调整「数据出境」策略。"}
     try:
         resp = requests.post(cfg["endpoint"], headers={"Authorization": f"Bearer {cfg['token']}"},
                              json={"target": target, "text": text}, timeout=10)
