@@ -1,0 +1,21 @@
+{
+  "name": "miniyuxi-office-bundle",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Build Univer (sheets+docs) into a single offline bundle for MiniYuxi web office surface.",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@univerjs/presets": "1.0.0",
+    "@univerjs/preset-sheets-core": "1.0.0",
+    "@univerjs/preset-docs-core": "1.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  }
+}

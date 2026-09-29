@@ -1,0 +1,193 @@
+/* =====================================================================
+ *  MiniYuxi 办公操作面（Office Surface）· 宿主样式
+ *  仅负责外壳（工具栏 / 列表浮层 / 容器），编辑器内部样式由 Univer 自带 CSS 提供。
+ *  明暗双主题：跟随主界面 wb_theme（data-theme="dark" 时切换变量）。
+ * ===================================================================== */
+
+.mxof-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  background: var(--mxof-bg, #ffffff);
+  color: var(--mxof-fg, #1f2328);
+  font: 13px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  /* 明（默认） */
+  --mxof-bg: #ffffff;
+  --mxof-fg: #1f2328;
+  --mxof-border: #e3e6ea;
+  --mxof-hover: #f3f4f6;
+  --mxof-accent: #274fee;
+  --mxof-accent-fg: #ffffff;
+  --mxof-muted: #8b949e;
+}
+
+.mxof-overlay[data-theme="dark"] {
+  --mxof-bg: #1b1d21;
+  --mxof-fg: #e6e8ea;
+  --mxof-border: #33373d;
+  --mxof-hover: #25282d;
+  --mxof-accent: #5b7cfa;
+  --mxof-accent-fg: #ffffff;
+  --mxof-muted: #8b949e;
+}
+
+/* ---------------- 工具栏 ---------------- */
+.mxof-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--mxof-border);
+  background: var(--mxof-bg);
+}
+
+.mxof-tabs { display: flex; gap: 2px; }
+
+.mxof-tab {
+  padding: 5px 14px;
+  border: 1px solid var(--mxof-border);
+  background: transparent;
+  color: var(--mxof-fg);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.mxof-tab:hover { background: var(--mxof-hover); }
+.mxof-tab.is-on {
+  background: var(--mxof-accent);
+  border-color: var(--mxof-accent);
+  color: var(--mxof-accent-fg);
+}
+
+.mxof-name {
+  width: 220px;
+  padding: 5px 9px;
+  border: 1px solid var(--mxof-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mxof-fg);
+  font-size: 13px;
+  outline: none;
+}
+.mxof-name:focus { border-color: var(--mxof-accent); }
+
+.mxof-badge {
+  font-size: 12px;
+  color: var(--mxof-muted);
+  white-space: nowrap;
+}
+
+.mxof-status {
+  flex: 1 1 auto;
+  font-size: 12px;
+  color: var(--mxof-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mxof-status.is-err { color: #e5534b; }
+
+.mxof-acts { display: flex; gap: 6px; margin-left: auto; }
+
+.mxof-btn {
+  padding: 5px 13px;
+  border: 1px solid var(--mxof-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mxof-fg);
+  cursor: pointer;
+  font-size: 13px;
+}
+.mxof-btn:hover { background: var(--mxof-hover); }
+.mxof-btn.is-primary {
+  background: var(--mxof-accent);
+  border-color: var(--mxof-accent);
+  color: var(--mxof-accent-fg);
+}
+.mxof-btn.is-primary:hover { filter: brightness(1.08); }
+
+/* ---------------- 编辑器容器 ---------------- */
+.mxof-container {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.mxof-error {
+  padding: 28px;
+  color: #e5534b;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.mxof-error small { color: var(--mxof-muted); }
+
+/* ---------------- 存档列表浮层 ---------------- */
+.mxof-list {
+  position: absolute;
+  right: 12px;
+  top: 52px;
+  width: 420px;
+  max-height: 60%;
+  overflow: auto;
+  z-index: 5;
+  background: var(--mxof-bg);
+  border: 1px solid var(--mxof-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .18);
+}
+
+.mxof-list-empty { padding: 18px; color: var(--mxof-muted); text-align: center; }
+
+.mxof-list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--mxof-border);
+  cursor: pointer;
+}
+.mxof-list-row:last-child { border-bottom: none; }
+.mxof-list-row:hover { background: var(--mxof-hover); }
+
+.mxof-list-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mxof-kind {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: var(--mxof-hover);
+  color: var(--mxof-muted);
+  font-size: 11px;
+}
+
+.mxof-list-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mxof-list-time { flex: 0 0 auto; font-size: 11px; color: var(--mxof-muted); }
+
+.mxof-list-del {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border: 1px solid var(--mxof-border);
+  border-radius: 4px;
+  background: transparent;
+  color: #e5534b;
+  cursor: pointer;
+  font-size: 12px;
+}
+.mxof-list-del:hover { background: var(--mxof-hover); }
