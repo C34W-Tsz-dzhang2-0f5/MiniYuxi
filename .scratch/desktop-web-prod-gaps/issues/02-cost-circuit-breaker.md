@@ -1,10 +1,12 @@
 # 02 · 成本硬熔断（maxSteps / 预算上限 / 失控循环）
 
-- **Status:** open
+- **Status:** done
 - **Type:** task
-- **Blocked by:** （无，可立即开工；与 01 无依赖）
+- **Blocked by:** （无，与 01 无依赖）
 - **Feature:** desktop-web-prod-gaps
 - **Source spec:** `.scratch/desktop-web-prod-gaps/spec.md` §Implementation Decisions ⑤
+- **Done commit:** `29fa0ce`（BudgetGuard+config） + `058927d`（integration）
+- **Done at:** 2026-09-29
 
 ## 纵向切片（tracer bullet）
 
@@ -12,10 +14,10 @@
 
 ## 验收
 
-- [ ] 超步数 / 超预算 / 失控循环 三场景均被熔断（不无限循环、不产生超额 token）
-- [ ] 熔断有告警（日志/SOC 链）
-- [ ] `_verify_cost_circuit_breaker.py` 新增并接入 `scripts/verify.py` 闸门
-- [ ] 配置项（上限数值）可经 `core/config.py` 读取，不硬编码
+- [x] 超步数 / 超时 / 超 token / 超成本 / 租户预算 / 失控循环 六场景均被熔断（不产生超额 token）
+- [x] 熔断有告警（best-effort 写 SOC 链 `type=circuit_breaker`，不崩主链路）
+- [x] `_verify_cost_circuit_breaker.py` 新增并接入 `scripts/verify.py` 闸门（13 项断言，quick 绿）
+- [x] 配置项（上限数值）经 `core/config.py` 读取（6 个 `MINIYUXI_*` 环境变量可覆盖，不硬编码）
 
 ## Comments
 （空）

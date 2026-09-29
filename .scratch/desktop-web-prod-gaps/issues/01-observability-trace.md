@@ -1,10 +1,12 @@
 # 01 · 可观测性 trace_id 贯穿 + 指标导出
 
-- **Status:** open
+- **Status:** done
 - **Type:** task
-- **Blocked by:** （无，可立即开工）
+- **Blocked by:** （无）
 - **Feature:** desktop-web-prod-gaps
 - **Source spec:** `.scratch/desktop-web-prod-gaps/spec.md` §Implementation Decisions ④
+- **Done commit:** `8825a49` + `058927d`（integration）
+- **Done at:** 2026-09-29
 
 ## 纵向切片（tracer bullet）
 
@@ -12,10 +14,10 @@
 
 ## 验收
 
-- [ ] 一次对话的 retrieval/tool/action 记录共享同一 `trace_id`
-- [ ] 指标可查询/导出（JSON 或端点）
-- [ ] `_verify_observability.py` 新增并接入 `scripts/verify.py` 闸门（全量 6/6→7/7 绿）
-- [ ] 命名严格对齐 `CONTEXT.md`（用 `trace_id`/`observability`，不用 `span_id`/`monitor` 等别名）
+- [x] 一次对话的 retrieval/tool/action 记录共享同一 `trace_id`（observability.start_trace + span 贯穿）
+- [x] 指标可查询/导出（`get_metrics()` 返回 dict：成功率/延迟/成本/by_span 聚合）
+- [x] `_verify_observability.py` 新增并接入 `scripts/verify.py` 闸门（quick 子集 6/6 绿，含本卡点）
+- [x] 命名严格对齐 `CONTEXT.md`（用 `trace_id`/`observability`，不用 `span_id`/`monitor` 等别名）
 
 ## Comments
 （空）

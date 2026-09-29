@@ -1,7 +1,7 @@
 # Spec: 桌面版/网页版上生产线禁补齐（④ 可观测性 + ⑤ 成本硬熔断）
 
 > 来源：`docs/enterprise-boundary-desktop-web-20260929.md` §3 门禁（🔴 必补项）
-> 状态：`draft`（待阿长确认后转 `ready-for-agent`）
+> 状态：`done`（两票均已于 2026-09-29 实现并接入 verify 闸门，commits 8825a49 / 29fa0ce / 058927d）
 > 路由：`ask-matt` → multi-session build → 本 spec 由 `to-spec` 综合已知产出 → `to-tickets` 拆两票 → `implement` 每票 `/tdd` + `/code-review`
 
 ## Problem Statement
