@@ -156,6 +156,76 @@ button { font-family: inherit; cursor: pointer; }
   background: var(--wb-hover); color: var(--wb-text);
 }
 
+/* ===================== 主导航栏（对齐 WorkBuddy 中文桌面版） =====================
+   截图基准：docs/_shots/wb-baseline-20260924/01-左侧导航.png
+   7 项：新建任务 / 助理 / 项目 / 专家·技能·连接器 / 定时任务 / 资料库 / 更多
+   形态：图标 16px + 文字 14px，行高 32px，圆角 6px，选中浅灰高亮 */
+.nav-rail {
+  display: flex; flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px 8px;
+  width: 100%;
+  flex: 0 0 auto;
+}
+.nav-rail--collapsed {
+  align-items: center;
+  padding: 4px 0 8px;
+}
+.nav-rail__item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; height: 32px;
+  padding: 0 10px;
+  border: 0; border-radius: var(--wb-r-nav);
+  background: transparent;
+  color: var(--wb-text-secondary);
+  font-size: 14px; line-height: 20px;
+  text-align: left;
+  white-space: nowrap; overflow: hidden;
+  transition: var(--wb-t-icon);
+}
+.nav-rail__item:hover { background: var(--wb-hover); color: var(--wb-text); }
+.nav-rail__item.is-active { background: var(--wb-hover-strong); color: var(--wb-text); font-weight: 500; }
+.nav-rail__icon { flex: 0 0 auto; width: 16px; height: 16px; display: block; }
+.nav-rail__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.nav-rail__caret { flex: 0 0 auto; opacity: .5; }
+
+/* 折叠态：只留图标，36×36 命中区 */
+.nav-rail--collapsed .nav-rail__item {
+  width: 36px; height: 36px;
+  padding: 0; gap: 0;
+  justify-content: center;
+}
+.nav-rail--collapsed .nav-rail__label,
+.nav-rail--collapsed .nav-rail__caret { display: none; }
+
+/* 二级菜单（专家·技能·连接器 / 更多） */
+.nav-rail__sub {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 2px 0 2px 26px;
+}
+.nav-rail__sub[hidden] { display: none; }
+.nav-rail__sub-item {
+  display: flex; align-items: center;
+  height: 28px; padding: 0 10px;
+  border: 0; border-radius: var(--wb-r-nav);
+  background: transparent;
+  color: var(--wb-text-secondary);
+  font-size: 13px;
+  text-align: left;
+  transition: var(--wb-t-icon);
+}
+.nav-rail__sub-item:hover { background: var(--wb-hover); color: var(--wb-text); }
+.nav-rail__sub-item.is-active { background: var(--wb-hover-strong); color: var(--wb-text); }
+
+/* 导航栏与下方会话区之间的分隔线 */
+.nav-rail::after {
+  content: ""; display: block;
+  height: 1px; margin: 6px 2px 2px;
+  background: var(--wb-border-soft);
+}
+.nav-rail--collapsed::after { margin: 6px 6px 2px; }
+
+
 .conversation-list-expanded { display: none; width: 100%; flex: 1 1 auto; overflow: hidden; flex-direction: column; }
 .conversation-list.is-expanded .conversation-list-expanded { display: flex; }
 .conversation-list.is-expanded .conversation-list-header-collapsed { display: none; }
@@ -191,6 +261,20 @@ button { font-family: inherit; cursor: pointer; }
   color: var(--wb-text); font-size: 13px; font-family: inherit;
 }
 .conversation-search input::placeholder { color: var(--wb-text-tertiary); }
+
+/* 会话分组标题（对齐 WorkBuddy 的「任务 (N) ∨」） */
+.conv-group-head {
+  display: flex; align-items: center; gap: 4px;
+  margin: 4px 12px 4px; padding: 0 4px;
+  height: 26px;
+  color: var(--wb-text-secondary);
+  font-size: 12px; font-family: var(--wb-font-cjk);
+  cursor: default;
+  user-select: none;
+}
+.conv-group-head__label { flex: 1 1 auto; }
+.conv-group-head__label b { font-weight: 500; color: var(--wb-text-tertiary); }
+.conv-group-head__caret { opacity: .5; }
 
 .conversation-list-body { flex: 1 1 auto; overflow-y: auto; padding: 0 8px 8px; }
 .conv-item {
@@ -307,8 +391,8 @@ body:not(.dark) .logo-dark { display: none; }
 .welcome-stage {
   display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
   flex: 1 1 auto; min-height: 0;
-  /* V7：留白随视口高度自适应，避免矮屏挤压、高屏头重脚轻 */
-  padding: clamp(40px, 11vh, 128px) 24px clamp(32px, 8vh, 96px);
+  /* 对齐 WorkBuddy：欢迎页无标题，顶部留白相应收敛（原为 clamp(40px,11vh,128px)） */
+  padding: clamp(24px, 7vh, 88px) 24px clamp(32px, 8vh, 96px);
   overflow-y: auto;
 }
 .wb-home-header {
@@ -346,18 +430,38 @@ body.dark .wb-scene-tabs__pill--active { color: var(--wb-canvas); }
 /* ---------- Composer ---------- */
 .wb-home-composer { width: 100%; max-width: 800px; }
 .wb-home-composer__chips { margin: 0 0 12px; }
-.quick-actions-container { width: 100%; }
-.quick-actions { position: relative; width: 100%; overflow: hidden; }
+.quick-actions-container { width: 100%; display: flex; align-items: center; }
+.quick-actions { position: relative; flex: 1 1 auto; min-width: 0; overflow: hidden; }
 .quick-actions--fade-right::after {
   content: ''; position: absolute; top: 0; right: 0; bottom: 0; width: 48px;
   background: linear-gradient(90deg, transparent, var(--wb-canvas));
   pointer-events: none;
 }
+/* 对齐 WorkBuddy：chips 单行横向滚动（原为 flex-wrap 换行，10 项会溢出到第二行） */
 .quick-actions__list {
-  display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;
+  display: flex; flex-wrap: nowrap; gap: 8px; justify-content: flex-start;
   overflow-x: auto; scrollbar-width: none;
+  padding-bottom: 2px;
 }
 .quick-actions__list::-webkit-scrollbar { display: none; }
+
+/* chips 行尾的「搜索」「右移」按钮（对齐 WorkBuddy 图2/图3/图4） */
+.quick-actions__tail {
+  display: inline-flex; align-items: center; gap: 4px;
+  flex: 0 0 auto; margin-left: 8px;
+}
+.quick-actions__tail-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px;
+  border: 1px solid var(--wb-border);
+  border-radius: 50%;
+  background: var(--wb-surface);
+  color: var(--wb-text-secondary);
+  transition: var(--wb-t-btn);
+}
+.quick-actions__tail-btn:hover { border-color: var(--wb-text-tertiary); color: var(--wb-text); }
+.quick-actions__tail-btn[disabled] { opacity: .4; cursor: default; }
+.quick-actions__tail-btn[disabled]:hover { border-color: var(--wb-border); color: var(--wb-text-secondary); }
 .quick-actions__item {
   display: inline-flex; align-items: center; gap: 6px;
   height: 32px; padding: 0 12px;
@@ -458,6 +562,23 @@ body.dark .wb-scene-tabs__pill--active { color: var(--wb-canvas); }
 }
 .footer-hint { font-family: var(--wb-font-cjk); font-size: 12px; color: var(--wb-text-tertiary); }
 .footer-hint b { font-weight: 600; color: var(--wb-text-secondary); }
+
+/* 输入框下方功能条（对齐 WorkBuddy：选择工作空间 ∨ / 允许完全访问 ∨） */
+.wb-footer-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 26px; padding: 0 8px;
+  border: 0; border-radius: var(--wb-r-nav);
+  background: transparent;
+  color: var(--wb-text-secondary);
+  font-size: 12px; font-family: var(--wb-font-cjk);
+  transition: var(--wb-t-icon);
+}
+.wb-footer-chip:hover { background: var(--wb-hover); color: var(--wb-text); }
+.wb-footer-chip__caret { opacity: .55; }
+/* 「允许完全访问」用警示色，与 WorkBuddy 的红色感叹号一致 */
+.wb-footer-chip--warn { color: #d9534f; }
+.wb-footer-chip--warn:hover { background: rgba(217, 83, 79, .08); color: #c9302c; }
+body.dark .wb-footer-chip--warn { color: #f08a86; }
 
 /* 引用文件下拉（对话输入框上方） */
 .ref-list {
@@ -840,3 +961,117 @@ body.dark .mx-err { color: #ff7b72; }
   .detail-panel-container { transition: none !important; }
   .detail-panel-drawer-backdrop { transition: none !important; }
 }
+
+/* ---------- 本地工具市场卡片 ---------- */
+.mkt-card {
+  border: 1px solid var(--wb-border, #e3e6ea);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  background: var(--wb-bg, #fff);
+  transition: border-color .15s;
+}
+.mkt-card.is-off { opacity: .65; background: var(--wb-hover, #f6f7f9); }
+.mkt-card:hover { border-color: var(--wb-accent, #5496f2); }
+
+.mkt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  gap: 10px;
+}
+.mkt-name {
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wb-text, #1f2328);
+}
+
+.mkt-desc {
+  font-size: 13px;
+  color: var(--wb-text-secondary, #57606a);
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+
+.mkt-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.mkt-cat, .mkt-src, .mkt-badge, .mkt-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.6;
+  border: 1px solid var(--wb-border, #e3e6ea);
+  background: var(--wb-canvas, #f6f7f9);
+  color: var(--wb-text-secondary, #57606a);
+}
+.mkt-cat { color: var(--wb-text, #1f2328); font-weight: 600; }
+.mkt-src--builtin { color: #2f7d4f; border-color: #c8e6cf; background: #ecf6ee; }
+.mkt-src--mcp { color: #6a40c8; border-color: #d8c8ee; background: #f1ebf9; }
+.mkt-src--user { color: #b8760f; border-color: #f1d99b; background: #fcf6e3; }
+.mkt-badge { color: #d9534f; border-color: #f4c8c4; background: #fdecec; }
+.mkt-badge--warn { color: #b8760f; border-color: #f1d99b; background: #fcf6e3; }
+.mkt-badge--crit { color: #d9534f; border-color: #f4c8c4; background: #fdecec; }
+.mkt-tag { color: #4a5568; }
+
+.mkt-toggle {
+  cursor: pointer;
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--wb-border, #e3e6ea);
+  background: var(--wb-canvas, #f6f7f9);
+  color: var(--wb-text-secondary, #57606a);
+  font-size: 11px;
+  user-select: none;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.mkt-toggle:hover { border-color: var(--wb-accent, #5496f2); }
+.mkt-toggle.on {
+  background: #ecf6ee;
+  color: #2f7d4f;
+  border-color: #c8e6cf;
+}
+.mkt-toggle:focus { outline: 2px solid var(--wb-accent, #5496f2); outline-offset: 1px; }
+
+/* ---------- 业务集成面板（RuoYi 适配器）---------- */
+.biz-wrap { display: flex; gap: 16px; align-items: flex-start; }
+.biz-side { width: 280px; flex: 0 0 280px; border-right: 1px solid var(--wb-border, #e3e6ea); padding-right: 14px; }
+.biz-main { flex: 1 1 auto; min-width: 0; }
+.biz-side__head { font-weight: 600; font-size: 13px; color: var(--wb-text, #1f2328); margin-bottom: 10px; }
+.biz-conn { border: 1px solid var(--wb-border, #e3e6ea); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+.biz-conn__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.biz-conn__ep { font-size: 11px; color: var(--wb-text-secondary, #57606a); margin-top: 3px; word-break: break-all; font-family: ui-monospace, Consolas, monospace; }
+.biz-st { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; }
+.biz-st--ok { color: #2f7d4f; border-color: #c8e6cf; background: #ecf6ee; }
+.biz-st--warn { color: #b8760f; border-color: #f1d99b; background: #fcf6e3; }
+.biz-st--bad { color: #d9534f; border-color: #f4c8c4; background: #fdecec; }
+.biz-st--off { color: #8a8f98; border-color: #e3e6ea; background: #f6f7f9; }
+.biz-add { margin: 10px 0; }
+.biz-add > summary { cursor: pointer; font-size: 12px; color: var(--wb-accent, #5496f2); }
+.biz-form { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.biz-hint { font-size: 11px; color: var(--wb-text-secondary, #57606a); line-height: 1.4; }
+.biz-tool__foot { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.biz-field { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; }
+.biz-field > span { font-size: 12px; color: var(--wb-text-secondary, #57606a); }
+.biz-req { color: #d9534f; }
+.biz-nofield { font-size: 12px; color: var(--wb-text-secondary, #57606a); margin: 4px 0; }
+.biz-tool__res { flex: 1 1 auto; min-width: 0; }
+.biz-res { display: block; font-size: 11.5px; color: var(--wb-text-secondary, #57606a); white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; font-family: ui-monospace, Consolas, monospace; }
+.biz-res--err { color: #d9534f; }
+.biz-risk { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--wb-border, #e3e6ea); }
+.biz-risk--info { color: #2f7d4f; border-color: #c8e6cf; background: #ecf6ee; }
+.biz-risk--warn { color: #b8760f; border-color: #f1d99b; background: #fcf6e3; }
+.biz-risk--high { color: #d9534f; border-color: #f4c8c4; background: #fdecec; font-weight: 600; }
+.biz-hitl { margin-top: 6px; border: 1px solid #f4c8c4; background: #fdecec; border-radius: 8px; padding: 10px 12px; }
+.biz-hitl__title { font-weight: 600; font-size: 13px; color: #d9534f; }
+.biz-hitl__sub { font-size: 12px; color: var(--wb-text-secondary, #57606a); margin: 2px 0 6px; }
+.biz-hitl__args { background: var(--wb-bg, #fff); border: 1px solid var(--wb-border, #e3e6ea); border-radius: 6px; padding: 8px; font-size: 11px; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0 0 8px; }
+.biz-hitl__foot { display: flex; gap: 10px; }
+.biz-hitl__res { font-size: 12px; color: var(--wb-text-secondary, #57606a); margin-top: 6px; }

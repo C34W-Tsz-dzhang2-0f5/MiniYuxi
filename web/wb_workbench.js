@@ -51,6 +51,11 @@
     { label: '新建', action: 'new' },
     { label: '导入', action: 'import' },
     { label: '知识库', action: 'kb' },
+    { label: '办公套件', action: 'office' },
+    { label: '工具市场', action: 'market' },
+    { label: '专家', action: 'experts' },
+    { label: '数据出境', action: 'egress' },
+    { label: '业务集成', action: 'biz' },
     { label: 'HRM人事', action: 'hrm' },
     { label: '流程', action: 'flow' },
     { label: '模型切换', action: 'model' },
@@ -59,12 +64,115 @@
     { label: '岗位工作台', action: 'roles' }
   ];
 
-  // 场景分组：日常办公 = 原站实测 10 项；代码开发 = 同构补充
+  /* ---------------- 左侧主导航（对齐 WorkBuddy 中文桌面版 7 项）----------------
+     基准：docs/_shots/wb-baseline-20260924/01-左侧导航.png
+     与 app.asar 提取的注册表逐项吻合：home/claw/project/market/automation/space/more
+     注：MiniYuxi 自有模块（HRM人事/流程/成本管理/管理/岗位工作台）仍留在顶部导航，
+         左侧导航与顶部导航并存，互不替代。 */
+  var RAIL_ICONS = {
+    task: '<path d="M2.6 3.1h10.8a.9.9 0 0 1 .9.9v6.2a.9.9 0 0 1-.9.9H7.5l-2.6 2.2v-2.2H2.6a.9.9 0 0 1-.9-.9V4a.9.9 0 0 1 .9-.9Z"/><path d="M8 5.3v3.4M6.3 7h3.4"/>',
+    assistant: '<circle cx="8" cy="6.1" r="2.3"/><path d="M3.5 13.3a4.7 4.7 0 0 1 9 0"/>',
+    project: '<circle cx="8" cy="8" r="5.6"/><circle cx="8" cy="4.5" r="1.05"/><circle cx="4.9" cy="10.1" r="1.05"/><circle cx="11.1" cy="10.1" r="1.05"/>',
+    market: '<path d="M8 2.6a5.4 5.4 0 1 1-5.4 5.4"/><path d="M8 5.2a2.8 2.8 0 1 1-2.8 2.8"/>',
+    schedule: '<circle cx="8" cy="8" r="5.6"/><path d="M8 4.7V8l2.5 1.6"/>',
+    library: '<path d="M8 4.1C6.9 3.2 5.3 2.9 3.2 3.1v8.6c2.1-.2 3.7.1 4.8 1 1.1-.9 2.7-1.2 4.8-1V3.1C10.7 2.9 9.1 3.2 8 4.1Z"/><path d="M8 4.1v8.6"/>',
+    more: '<rect x="3" y="3" width="4.2" height="4.2" rx="1.1"/><rect x="8.8" y="3" width="4.2" height="4.2" rx="1.1"/><rect x="3" y="8.8" width="4.2" height="4.2" rx="1.1"/><rect x="8.8" y="8.8" width="4.2" height="4.2" rx="1.1"/>'
+  };
+
+  var RAIL_ITEMS = [
+    { id: 'new-task',  label: '新建任务', icon: 'task',      run: function () { startNewChat(); } },
+    { id: 'assistant', label: '助理',     icon: 'assistant', run: function () { openAssistantModal(); } },
+    { id: 'project',   label: '项目',     icon: 'project',   run: function () { openProjectModal(); } },
+    { id: 'market',    label: '专家·技能·连接器', icon: 'market', children: [
+        { id: 'experts',    label: '专家',   run: function () { openExpertDrawer(); } },
+        { id: 'skills',     label: '技能',   run: function () { openSkillDrawer(); } },
+        { id: 'connectors', label: '连接器', run: function () { openConnectorDrawer(); } }
+      ] },
+    { id: 'schedule',  label: '定时任务', icon: 'schedule',  run: function () { openScheduleModal(); } },
+    { id: 'library',   label: '资料库',   icon: 'library',   run: function () { openKbModal(); } },
+    // 「更多」子项 = 顶部导航的自有模块入口，提供第二路径（WorkBuddy 的 more 同样是子菜单）
+    { id: 'more',      label: '更多',     icon: 'more',      children: NAV_ITEMS
+        .filter(function (n) { return n.action !== 'new'; })
+        .map(function (n) { return { id: n.action, label: n.label, run: function () { handleNavAction(n.action); } }; }) }
+  ];
+
+  function railIcon(name) {
+    return '<svg class="nav-rail__icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
+           'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+           (RAIL_ICONS[name] || '') + '</svg>';
+  }
+
+  /* 展开态：图标 + 文字，带二级菜单；折叠态：仅图标 */
+  function renderNavRail() {
+    var expanded = $('#navRail'), collapsed = $('#navRailCollapsed');
+    if (expanded) {
+      expanded.innerHTML = RAIL_ITEMS.map(function (it) {
+        var caret = it.children
+          ? '<svg class="nav-rail__caret" width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">' +
+            '<path d="M4.5 6h7L8 10.5 4.5 6Z"/></svg>'
+          : '';
+        var sub = it.children
+          ? '<div class="nav-rail__sub" id="railSub_' + it.id + '" hidden>' +
+              it.children.map(function (c) {
+                return '<button type="button" class="nav-rail__sub-item" data-rail-sub="' + c.id + '">' + c.label + '</button>';
+              }).join('') + '</div>'
+          : '';
+        return '<button type="button" class="nav-rail__item" data-rail="' + it.id + '"' +
+               (it.children ? ' aria-expanded="false"' : '') + '>' +
+               railIcon(it.icon) + '<span class="nav-rail__label">' + it.label + '</span>' + caret +
+               '</button>' + sub;
+      }).join('');
+    }
+    if (collapsed) {
+      collapsed.innerHTML = RAIL_ITEMS.map(function (it) {
+        return '<button type="button" class="nav-rail__item" data-rail="' + it.id + '" title="' + it.label + '" aria-label="' + it.label + '">' +
+               railIcon(it.icon) + '</button>';
+      }).join('');
+    }
+    bindNavRail();
+  }
+
+  function bindNavRail() {
+    $$('#navRail .nav-rail__item, #navRailCollapsed .nav-rail__item').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var it = RAIL_ITEMS.filter(function (x) { return x.id === btn.dataset.rail; })[0];
+        if (!it) return;
+        if (it.children) {                       // 有子项：就地展开/收起
+          var sub = $('#railSub_' + it.id);
+          if (sub) {
+            var willOpen = sub.hidden;
+            sub.hidden = !willOpen;
+            btn.setAttribute('aria-expanded', String(willOpen));
+            btn.classList.toggle('is-active', willOpen);
+          }
+          return;
+        }
+        $$('#navRail .nav-rail__item').forEach(function (x) { x.classList.remove('is-active'); });
+        btn.classList.add('is-active');
+        if (it.run) it.run();
+      });
+    });
+    $$('#navRail .nav-rail__sub-item').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var it = RAIL_ITEMS.filter(function (x) { return x.id === 'market' || x.id === 'more'; })
+          .reduce(function (acc, x) { return acc.concat(x.children || []); }, [])
+          .filter(function (c) { return c.id === b.dataset.railSub; })[0];
+        $$('#navRail .nav-rail__sub-item').forEach(function (x) { x.classList.remove('is-active'); });
+        b.classList.add('is-active');
+        if (it && it.run) it.run();
+      });
+    });
+  }
+
+
+  // 场景分组：对齐 WorkBuddy 中文桌面版截图（docs/_shots/wb-baseline-20260924/）
+  //   - 代码开发 / 设计创意 两组在截图里完整可见 → 逐项照搬
+  //   - 日常办公 在截图里被横向截断（仅 3 项可见 + 右箭头）→ 已知项前置，其余保留，待补截图
   var SCENES = {
-    '日常办公': ['幻灯片', '视频生成', '深度研究', '文档处理', '数据分析',
-                 '可视化', '金融服务', '产品管理', '设计', '邮件编辑'],
-    '代码开发': ['代码补全', '重构建议', '单元测试', '代码审查', 'Bug 定位',
-                 '接口联调', '性能分析', 'SQL 优化']
+    '日常办公': ['数据分析及可视化', '个人工作台', '幻灯片', '视频生成', '深度研究',
+                 '文档处理', '金融服务', '产品管理', '设计', '邮件编辑'],
+    '代码开发': ['日常开发', '网站开发', '小程序', 'Agent 应用', 'Skill 开发', 'CI/CD'],
+    '设计创意': ['生成图片', '生成视频', '品牌设计', '视觉海报', '运营海报', 'PPT设计']
   };
 
   var ICONS = window.__WB_ICONS__ || {};
@@ -231,8 +339,32 @@
       case 'cost': openCostModal(); break;
       case 'admin': openAdminModal(); break;
       case 'roles': openTaskFlowModal(); break;
+      case 'office': openOfficeSurface(); break;
+      case 'market': openMarketDrawer(); break;
+      case 'experts': window.open('/experts-market.html', '_blank'); break;
+      case 'egress': openEgressModal(); break;
+      case 'biz': openBizPanel(); break;
       default: toast('功能入口：' + action);
     }
+  }
+
+  /* ---------------- 办公操作面（Univer 办公套件 · 纯本地） ----------------
+     懒加载：仅首次点击才拉取 /office/office-host.js 与 Univer 离线包（数 MB），
+     避免拖慢首屏；资产未构建时后端返回 503，此处给出可执行的构建指引。
+     合规：快照只存本机 SQLite，不触达外部服务，也不回退任何 CDN。 */
+  function openOfficeSurface(kind) {
+    function boot() {
+      if (!window.MiniYuxiOffice) { toast('办公套件未就绪：请先构建 Univer 资产'); return; }
+      window.MiniYuxiOffice.open(kind || 'sheet');
+    }
+    if (window.MiniYuxiOffice) { boot(); return; }
+    var s = document.createElement('script');
+    s.src = '/office/office-host.js';
+    s.onload = boot;
+    s.onerror = function () {
+      toast('办公套件未就绪：cd tools/office-bundle && npm install && npm run build');
+    };
+    document.head.appendChild(s);
   }
 
   /* ---------------- 岗位工作台：左列表（页签+搜索）右运行双栏 ---------------- */
@@ -425,17 +557,203 @@
   $('#fmClose').addEventListener('click', closeFeatureModal);
   $('#featureModal').addEventListener('click', function (e) { if (e.target === $('#featureModal')) closeFeatureModal(); });
 
-  /* ---------------- 知识库弹窗 ---------------- */
+  /* ---------------- 助理（对齐 WorkBuddy 左侧导航第 2 项）----------------
+     如实呈现：后端有 /api/subagent（生成器/评判器分离），但无 WorkBuddy 那种
+     「Agent 同事」实体。这里列出后端实际注册的子 Agent，不造数据。 */
+  function openAssistantModal() {
+    openFeatureModal('子 Agent（助理）',
+      '<div class="fm-sub">可选用的 Agent 同事实体：内置只读「制度检索员」+ 你自定义的子 Agent。任务在主 Agent 之外隔离执行，结论摘要回传。</div>' +
+      '<div id="asstList"><div class="fm-empty">加载中…</div></div>' +
+      '<div class="asst-dispatch" id="asstDispatch" hidden>' +
+        '<div class="asst-dispatch__head">派发任务给：<b id="asstPickName"></b></div>' +
+        '<textarea id="asstTask" class="fm-input" rows="3" placeholder="描述要交给子 Agent 完成的任务…"></textarea>' +
+        '<div style="margin-top:8px"><button class="fm-btn" id="asstRun">运行</button>' +
+        '<button class="fm-btn secondary" id="asstClear">取消</button></div>' +
+        '<div id="asstResult" class="fm-ask-res" hidden></div>' +
+      '</div>' +
+      '<details class="asst-new"><summary>＋ 新建子 Agent</summary>' +
+        '<div class="asst-form">' +
+          '<input id="newName" class="fm-input" placeholder="名称（如：薪酬核算员）">' +
+          '<input id="newRole" class="fm-input" placeholder="角色说明（可选）">' +
+          '<textarea id="newPrompt" class="fm-input" rows="3" placeholder="系统提示词：定义它的职责与口径"></textarea>' +
+          '<label class="asst-ro"><input type="checkbox" id="newRO"> 只读（仅检索知识库，不外发 / 不写）</label>' +
+          '<button class="fm-btn" id="newSave">保存子 Agent</button>' +
+        '</div>' +
+      '</details>',
+      '<button class="fm-btn secondary" id="asstClose">关闭</button>');
+    $('#asstClose').addEventListener('click', closeFeatureModal);
+    $('#asstRun').addEventListener('click', asstRun);
+    $('#asstClear').addEventListener('click', function () { var x = $('#asstDispatch'); if (x) x.hidden = true; });
+    $('#newSave').addEventListener('click', asstCreate);
+    window.__asstPickId = '';
+    window.__asstPick = function (id, name) {
+      window.__asstPickId = id;
+      var n = $('#asstPickName'); if (n) n.textContent = name;
+      var box = $('#asstDispatch'); if (box) box.hidden = false;
+      var t = $('#asstTask'); if (t) t.focus();
+    };
+    loadAssistantAgents();
+  }
+
+  function loadAssistantAgents() {
+    wbFetch('/api/subagent').then(function (r) { return r.json(); }).then(function (d) {
+      var list = (d && d.agents) || [];
+      var box = $('#asstList');
+      if (!box) return;
+      if (!list.length) { box.innerHTML = '<div class="fm-empty">无可用子 Agent</div>'; return; }
+      box.innerHTML = list.map(function (a) {
+        var ro = a.read_only ? ' · 只读' : '';
+        var builtin = a.builtin ? ' · 内置' : '';
+        var del = a.builtin ? '' : ' <button class="cmd-del" data-del="' + escAttr(a.id) + '">✕</button>';
+        return '<div class="fm-card asst-card"><div class="fm-card-title">' + escHtml(a.name) +
+               '<button class="fm-btn small" data-use="' + escAttr(a.id) + '" data-name="' + escAttr(a.name) + '">选用</button></div>' +
+               '<div class="fm-sub">' + escHtml(a.role || a.system_prompt || '') + ro + builtin + del + '</div></div>';
+      }).join('');
+      $$('#asstList [data-use]').forEach(function (b) {
+        b.addEventListener('click', function () { window.__asstPick(b.dataset.use, b.dataset.name); });
+      });
+      $$('#asstList [data-del]').forEach(function (b) {
+        b.addEventListener('click', function (e) {
+          e.stopPropagation();
+          wbFetch('/api/subagent/' + encodeURIComponent(b.dataset.del), { method: 'DELETE' })
+            .then(function (r) { return r.json(); })
+            .then(function () { toast('已删除子 Agent'); loadAssistantAgents(); })
+            .catch(function (er) { toast('删除失败：' + (er.message || er)); });
+        });
+      });
+    }).catch(function (e) {
+      var box = $('#asstList'); if (box) box.innerHTML = '<div class="fm-empty">接口不可用：' + (e.message || e) + '</div>';
+    });
+  }
+
+  function asstCreate() {
+    var name = ($('#newName').value || '').trim();
+    if (!name) { toast('请填写名称'); return; }
+    var body = {
+      name: name,
+      role: ($('#newRole').value || '').trim(),
+      system_prompt: ($('#newPrompt').value || '').trim(),
+      read_only: !!(document.getElementById('newRO') && document.getElementById('newRO').checked)
+    };
+    wbFetch('/api/subagent', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function () {
+        toast('已创建子 Agent');
+        var n = document.getElementById('newName'); if (n) n.value = '';
+        var r2 = document.getElementById('newRole'); if (r2) r2.value = '';
+        var p = document.getElementById('newPrompt'); if (p) p.value = '';
+        var ro = document.getElementById('newRO'); if (ro) ro.checked = false;
+        loadAssistantAgents();
+      })
+      .catch(function (e) { toast('创建失败：' + (e.message || e)); });
+  }
+
+  function asstRun() {
+    var task = ($('#asstTask').value || '').trim();
+    var aid = window.__asstPickId || '';
+    if (!task) { toast('请输入任务'); return; }
+    var res = $('#asstResult');
+    if (!res) return;
+    res.hidden = false;
+    res.innerHTML = '<div class="fm-empty">子 Agent 执行中…</div>';
+    wbFetch('/api/subagent/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task: task, agent_id: aid, max_rounds: 3, criteria: { min_len: 10, must_contain: [] } })
+    })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (d) {
+        var verdict = d.passed ? '✅ 通过' : '⚠️ 未达标';
+        var reasons = (d.verdict && d.verdict.reasons && d.verdict.reasons.length)
+          ? '<div class="fm-sub">评判：' + esc(d.verdict.reasons.join('；')) + '</div>' : '';
+        res.innerHTML = '<div class="fm-ans">' + esc(d.draft || '') + '</div>' +
+          '<div class="fm-meta">轮次 ' + (d.rounds || 0) + ' · ' + verdict +
+          ' · Agent：' + esc((d.agent && d.agent.name) || aid) + '</div>' + reasons;
+      })
+      .catch(function (e) { res.innerHTML = '<div class="fm-empty">执行失败：' + (e.message || e) + '</div>'; });
+  }
+
+  /* ---------------- 项目（对齐 WorkBuddy 左侧导航第 3 项）----------------
+     ⚠️ 后端无 projects 模块。此页如实说明，不做假界面。 */
+  function openProjectModal() {
+    openFeatureModal('项目',
+      '<div class="fm-sub">⚠️ 该模块后端尚未实现</div>' +
+      '<div class="fm-note">' +
+      'WorkBuddy 桌面版的「项目」是任务/文件的组织容器。MiniYuxi 后端目前<b>没有 projects 模块</b>' +
+      '（<code>core/</code> 下无对应实现，<code>api.py</code> 无 <code>/api/projects</code> 路由）。' +
+      '为不误导使用，此页不做界面填充。<br><br>' +
+      '要落地需要：① 建 <code>projects</code> 表（id/name/owner/status）；② 加 <code>/api/projects</code> CRUD 路由；' +
+      '③ 会话与项目关联。<b>属后端开发任务，需另行排期。</b>' +
+      '</div>',
+      '<button class="fm-btn secondary" id="projClose">关闭</button>');
+    $('#projClose').addEventListener('click', closeFeatureModal);
+  }
+
+  /* ---------------- 定时任务（对齐 WorkBuddy 左侧导航第 5 项）---------------- */
+  function openScheduleModal() {
+    openFeatureModal('定时任务',
+      '<div class="fm-sub">后端调度器已注册的任务（数据来自 <code>/api/schedules</code>）</div>' +
+      '<div id="schList"><div class="fm-empty">加载中…</div></div>',
+      '<button class="fm-btn secondary" id="schClose">关闭</button>');
+    $('#schClose').addEventListener('click', closeFeatureModal);
+
+    wbFetch('/api/schedules').then(function (r) { return r.json(); }).then(function (rows) {
+      var list = Array.isArray(rows) ? rows : [];
+      if (!list.length) { $('#schList').innerHTML = '<div class="fm-empty">暂无定时任务</div>'; return; }
+      $('#schList').innerHTML = list.map(function (j) {
+        var spec = j.spec || {};
+        var desc = spec.kind === 'interval' ? ('每 ' + (spec.seconds || '?') + ' 秒')
+                 : spec.kind === 'cron' ? ('cron: ' + (spec.expr || spec.cron || '?'))
+                 : spec.kind === 'at' ? ('定时于 ' + (spec.at || '?')) : (spec.kind || '—');
+        return '<div class="fm-card"><div class="fm-card-title">' + (j.name || j.id) + '</div>' +
+               '<div class="fm-sub">' + desc + ' · 状态 ' + (j.status || '—') +
+               ' · 上次运行 ' + (j.last_run || '从未') + '</div></div>';
+      }).join('');
+    }).catch(function () {
+      $('#schList').innerHTML = '<div class="fm-empty">接口不可用，无法读取定时任务</div>';
+    });
+  }
+
+  /* ---------------- 知识库弹窗（制度地图 + 可点击出处）----------------
+     逆向自 ZCode 企业知识库检索：① 按场景分类找制度；② 每个结论带 [编号] 出处，
+     可点击跳转查看原文；③ 上传即归类。 */
+  var KB_DOMAINS = [
+    { key: '招聘', icon: '🧲' }, { key: '薪酬', icon: '💰' }, { key: '社保', icon: '🛡' },
+    { key: '离职', icon: '👋' }, { key: '绩效', icon: '📈' }, { key: '合同', icon: '📄' },
+    { key: '合规', icon: '⚖️' }, { key: '其他', icon: '🗂' }
+  ];
+  var KB_FILTER = '';
   function openKbModal() {
-    openFeatureModal('HR 知识库',
+    var domainCards = KB_DOMAINS.map(function (dm) {
+      return '<button class="kb-domain" data-cat="' + escAttr(dm.key) + '">' + dm.icon + ' ' + dm.key + '</button>';
+    }).join('');
+    var catOpts = KB_DOMAINS.map(function (d) {
+      return '<option value="' + escAttr(d.key) + '">' + d.key + '</option>';
+    }).join('');
+    openFeatureModal('HR 知识库 · 制度地图',
+      '<div class="fm-sub">按场景找制度（点击下方分类筛选已上传文档）</div>' +
+      '<div class="kb-domains" id="kbDomains">' + domainCards + '</div>' +
       '<div class="fm-ask"><input class="fm-input" id="fmKbQ" placeholder="向知识库提问（制度 / 流程 / 政策）">' +
         '<button class="fm-btn" id="fmKbAsk">提问</button></div>' +
       '<div class="fm-ask-res" id="fmKbRes" hidden></div>' +
+      '<div id="fmKbDoc" class="fm-doc" hidden></div>' +
+      '<div class="kb-upload"><span class="kb-upload__label">导入制度文件</span>' +
+        '<input type="file" id="fmKbFile" accept=".txt,.md,.markdown,.docx,.pdf">' +
+        '<select id="fmKbCat" class="fm-input">' + catOpts + '</select>' +
+        '<button class="fm-btn" id="fmKbImport">导入</button></div>' +
       '<div id="fmKbList"><div class="fm-empty">加载中…</div></div>',
       '<button class="fm-btn secondary" id="fmKbRefresh">刷新文档列表</button>');
-    $('#fmKbRefresh').addEventListener('click', loadKbDocs);
+    $('#fmKbRefresh').addEventListener('click', function () { loadKbDocs(); });
     $('#fmKbAsk').addEventListener('click', kbAsk);
     $('#fmKbQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') kbAsk(); });
+    $('#fmKbImport').addEventListener('click', kbImport);
+    $('#kbDomains').addEventListener('click', function (e) {
+      var b = e.target.closest('.kb-domain'); if (!b) return;
+      KB_FILTER = (KB_FILTER === b.dataset.cat) ? '' : b.dataset.cat;
+      $$('#kbDomains .kb-domain').forEach(function (x) { x.classList.toggle('on', x.dataset.cat === KB_FILTER); });
+      loadKbDocs();
+    });
     loadKbDocs();
   }
   function loadKbDocs() {
@@ -445,21 +763,44 @@
     wbFetch('/api/kb/docs')
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (docs) {
+        if (KB_FILTER) docs = docs.filter(function (d) { return (d.category || '其他') === KB_FILTER; });
         if (!docs || !docs.length) {
-          body.innerHTML = '<div class="fm-empty">知识库暂无文档，可通过「导入」上传制度文件。</div>';
+          body.innerHTML = '<div class="fm-empty">知识库暂无' + (KB_FILTER ? ('「' + KB_FILTER + '」类') : '') + '文档，可通过上方「导入制度文件」上传。</div>';
           return;
         }
         body.innerHTML = '<ul class="fm-list">' + docs.map(function (d) {
+          var cat = d.category || '其他';
           return '<li><div class="t"><div>' + (d.title || '未命名') + '</div>' +
-                 '<div class="s">' + (d.source || d.id || '') + ' · ' + (d.n_chunks || 0) + ' chunks · ' + (d.created_at || '') + '</div></div></li>';
+                 '<div class="s">' + (d.source || d.id || '') + ' · ' + (d.n_chunks || 0) + ' chunks · ' + (d.created_at || '') +
+                 ' · <span class="kb-cat">' + escHtml(cat) + '</span></div></div></li>';
         }).join('') + '</ul>';
       })
       .catch(function (e) { body.innerHTML = '<div class="fm-empty">加载失败：' + (e.message || e) + '</div>'; });
+  }
+  function kbImport() {
+    var f = $('#fmKbFile');
+    if (!f || !f.files || !f.files.length) { toast('请先选择文件'); return; }
+    var cat = ($('#fmKbCat').value || '其他');
+    var fd = new FormData();
+    fd.append('file', f.files[0]);
+    fd.append('category', cat);
+    var btn = $('#fmKbImport');
+    if (btn) { btn.disabled = true; btn.textContent = '导入中…'; }
+    wbFetch('/api/kb/upload', { method: 'POST', body: fd })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j && j.doc_id) { toast('已导入：' + (j.title || '')); if (f) f.value = ''; KB_FILTER = cat; loadKbDocs(); }
+        else { toast('导入失败：' + JSON.stringify(j)); }
+      })
+      .catch(function (e) { toast('导入失败：' + (e.message || e)); })
+      .finally(function () { if (btn) { btn.disabled = false; btn.textContent = '导入'; } });
   }
   function kbAsk() {
     var q = ($('#fmKbQ').value || '').trim();
     if (!q) { toast('请输入问题'); return; }
     var res = $('#fmKbRes');
+    var docPanel = $('#fmKbDoc');
+    if (docPanel) docPanel.hidden = true;
     res.hidden = false;
     res.innerHTML = '<div class="fm-empty">思考中…</div>';
     wbFetch('/api/rag/ask', {
@@ -470,15 +811,281 @@
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (d) {
         var ans = d.answer || '(无答案)';
-        var cites = (d.citations || []).slice(0, 5).map(function (c) {
-          var t = c.title || c.source || (c.content || '').toString().slice(0, 120) || '';
-          return '<li>' + esc(t) + '</li>';
+        // 内联 [n] 高亮（与引用列表编号一致），可点击跳转
+        var safe = esc(ans).replace(/\[(\d+)\]/g, function (m, n) {
+          return '<mark class="cite-mark" data-cite="' + n + '">' + m + '</mark>';
+        });
+        var cites = (d.citations || []).slice(0, 5).map(function (c, i) {
+          var idx = i + 1;
+          var t = c.title || c.source || (c.text || '').toString().slice(0, 120) || '';
+          var jump = c.doc_id ? '<button class="cite-jump" data-doc="' + escAttr(c.doc_id) + '" data-idx="' + idx + '">查看原文</button>' : '';
+          return '<li><span class="cite-idx">[' + idx + ']</span> ' + esc(t) +
+                 (c.doc_id ? ' <span class="cite-doc">' + esc(c.doc_id) + '</span>' : '') + ' ' + jump + '</li>';
         }).join('');
-        res.innerHTML = '<div class="fm-ans">' + esc(ans) + '</div>' +
-          (cites ? '<div class="fm-cites">参考：<ul>' + cites + '</ul></div>' : '') +
+        res.innerHTML = '<div class="fm-ans">' + safe + '</div>' +
+          (cites ? '<div class="fm-cites">参考来源：<ul>' + cites + '</ul></div>' : '') +
           '<div class="fm-meta">来源：' + esc(d.mode || 'native') + '</div>';
+        $$('#fmKbRes .cite-jump').forEach(function (el) {
+          el.addEventListener('click', function () { kbJump(el.dataset.doc, el.dataset.idx); });
+        });
+        $$('#fmKbRes .cite-mark').forEach(function (mk) {
+          mk.addEventListener('click', function () {
+            var j = document.querySelector('#fmKbRes .cite-jump[data-idx="' + mk.dataset.cite + '"]');
+            if (j) kbJump(j.dataset.doc, mk.dataset.cite);
+          });
+        });
       })
       .catch(function (e) { res.innerHTML = '<div class="fm-empty">提问失败：' + (e.message || e) + '</div>'; });
+  }
+  function kbJump(docId, idx) {
+    var panel = $('#fmKbDoc');
+    if (!panel) return;
+    panel.hidden = false;
+    panel.innerHTML = '<div class="fm-empty">加载原文中…</div>';
+    wbFetch('/api/kb/docs/' + encodeURIComponent(docId))
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (doc) {
+        panel.innerHTML = '<div class="fm-doc-title">' + esc(doc.title || '') + ' <span class="kb-cat">' + escHtml(doc.category || '其他') + '</span></div>' +
+          '<pre class="fm-doc-text">' + esc(doc.text || '(空)') + '</pre>';
+        var mk = document.querySelector('#fmKbRes mark[data-cite="' + idx + '"]');
+        if (mk) { mk.classList.add('cite-flash'); try { mk.scrollIntoView({ block: 'center' }); } catch (e) {} }
+      })
+      .catch(function (e) { panel.innerHTML = '<div class="fm-empty">原文加载失败：' + (e.message || e) + '</div>'; });
+  }
+
+  /* ---------------- 本地工具市场（抄 treg 理念 · 本地化 · 不接远端凭据） ----------------
+     分类 chips + 关键词搜索 + 启停切换。所有数据经 /api/market/* 读本地 SQLite，
+     启停接口要求 agent.run 权限并写审计；调用本身仍走 /api/tools/call（受审批门管理）。
+     合规红线：不复制 treg 的 OpenRouter-for-tools 形态，也不引入远端工具目录拉取。 */
+  var MARKET_STATE = { category: '', q: '', enabled_only: false };
+
+  function openMarketDrawer() {
+    openFeatureModal('本地工具市场',
+      '<div class="fm-sub">浏览 / 启停本机注册的工具（内置 + 本地 MCP）。所有数据走本地 SQLite，不向任何远端服务注入凭据。</div>' +
+      '<div class="kb-domains" id="marketCats"><span class="fm-empty">加载分类…</span></div>' +
+      '<div class="fm-ask"><input class="fm-input" id="fmMarketQ" placeholder="按名称或描述关键词筛选">' +
+        '<button class="fm-btn secondary" id="fmMarketEnabledOnly">仅看已启用</button>' +
+        '<button class="fm-btn" id="fmMarketRefresh">刷新</button></div>' +
+      '<div id="fmMarketList"><div class="fm-empty">加载中…</div></div>',
+      '<span class="fm-sub" style="margin:0">提示：停用后工具仍存在注册表，但 /api/tools/call 调用时被拒。</span>');
+    var eb = $('#fmMarketEnabledOnly');
+    if (eb) {
+      eb.addEventListener('click', function () {
+        MARKET_STATE.enabled_only = !MARKET_STATE.enabled_only;
+        eb.textContent = MARKET_STATE.enabled_only ? '查看全部' : '仅看已启用';
+        loadMarket();
+      });
+    }
+    var q = $('#fmMarketQ');
+    if (q) q.addEventListener('input', function (e) { MARKET_STATE.q = e.target.value.trim(); loadMarket(); });
+    var rf = $('#fmMarketRefresh');
+    if (rf) rf.addEventListener('click', loadMarket);
+    loadMarket();
+  }
+
+  function renderMarketCategories(cats) {
+    var host = document.getElementById('marketCats');
+    if (!host) return;
+    var html = '<button class="kb-domain' + (MARKET_STATE.category === '' ? ' on' : '') + '" data-cat="">全部</button>';
+    (cats || []).forEach(function (c) {
+      html += '<button class="kb-domain' + (MARKET_STATE.category === c.category ? ' on' : '') +
+              '" data-cat="' + escAttr(c.category) + '">' + esc(c.category) + ' <small>(' + c.count + ')</small></button>';
+    });
+    host.innerHTML = html;
+    $$('#marketCats .kb-domain').forEach(function (b) {
+      b.addEventListener('click', function () {
+        MARKET_STATE.category = (MARKET_STATE.category === b.dataset.cat) ? '' : b.dataset.cat;
+        renderMarketCategories(cats);  // 重画高亮
+        loadMarket();
+      });
+    });
+  }
+
+  function loadMarket() {
+    var body = $('#fmMarketList');
+    if (!body) return;
+    body.innerHTML = '<div class="fm-empty">加载中…</div>';
+    var qs = '?';
+    if (MARKET_STATE.category) qs += 'category=' + encodeURIComponent(MARKET_STATE.category) + '&';
+    if (MARKET_STATE.q) qs += 'q=' + encodeURIComponent(MARKET_STATE.q) + '&';
+    if (MARKET_STATE.enabled_only) qs += 'enabled_only=true&';
+    wbFetch('/api/market/list' + qs)
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (d) {
+        renderMarketCategories(d.categories || []);
+        if (!d.tools || !d.tools.length) {
+          body.innerHTML = '<div class="fm-empty">没有匹配的工具</div>';
+          return;
+        }
+        body.innerHTML = d.tools.map(function (t) {
+          var tags = (t.tags || []).map(function (x) {
+            return '<span class="mkt-tag">' + esc(x) + '</span>';
+          }).join('');
+          var badges = '<span class="mkt-cat">' + esc(t.category || '未分类') + '</span>' +
+            '<span class="mkt-src mkt-src--' + esc(t.source || 'unknown') + '">' + esc(t.source || 'unknown') + '</span>';
+          if (t.requires_approval) badges += '<span class="mkt-badge">需审批</span>';
+          if (t.risk === 'warn') badges += '<span class="mkt-badge mkt-badge--warn">warn</span>';
+          if (t.risk === 'critical') badges += '<span class="mkt-badge mkt-badge--crit">critical</span>';
+          var togCls = t.enabled ? 'mkt-toggle on' : 'mkt-toggle';
+          var togLbl = t.enabled ? '已启用' : '已停用';
+          return '<div class="mkt-card' + (t.enabled ? '' : ' is-off') + '">' +
+            '<div class="mkt-head">' +
+              '<span class="mkt-name">' + esc(t.name) + '</span>' +
+              '<span class="' + togCls + '" data-name="' + escAttr(t.name) + '" role="button" tabindex="0">' + togLbl + '</span>' +
+            '</div>' +
+            '<div class="mkt-desc">' + esc(t.description || '') + '</div>' +
+            '<div class="mkt-meta">' + badges + tags + '</div>' +
+          '</div>';
+        }).join('');
+        $$('#fmMarketList .mkt-toggle').forEach(function (b) {
+          b.addEventListener('click', function () { marketToggle(b.dataset.name, !b.classList.contains('on'), b); });
+          b.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') marketToggle(b.dataset.name, !b.classList.contains('on'), b); });
+        });
+      })
+      .catch(function (e) {
+        body.innerHTML = '<div class="fm-empty">加载失败：' + esc(e.message) + '</div>';
+      });
+  }
+
+  function marketToggle(name, wantEnabled, btn) {
+    btn.textContent = '切换中…';
+    wbFetch('/api/market/' + encodeURIComponent(name) + '/toggle?enabled=' + (wantEnabled ? 'true' : 'false'), { method: 'POST' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function () { loadMarket(); })
+      .catch(function () {
+        btn.textContent = '失败';
+        setTimeout(function () { loadMarket(); }, 1200);
+      });
+  }
+
+  /* ---------------- 数据出境管控（企业级定位落地：出境开关 + 出境日志） ----------------
+     定位更正为「数据可以出本机」后，企业级的两条硬要求在此产品化：
+       ① 出境可按**数据分级**配置（allow / deny / approval 三态，非全开全关）；
+       ② 出境行为**可审计**（含被拒绝的）。
+     合规红线：后端已保证日志只存脱敏截断摘要；前端只展示摘要，不放大任何载荷。 */
+  var EG_STATE = { cls: '', decision: '' };
+  var EG_MODE_LABEL = { allow: '放行', deny: '禁止', approval: '需审批' };
+  var EG_LEVEL_LABEL = { public: '公开', internal: '内部', confidential: '机密' };
+
+  function openEgressModal() {
+    openFeatureModal('数据出境管控',
+      '<div class="fm-sub">5 类目的地 · 10 个出境口全部过闸。<b>默认全放行</b>，可按数据分级收紧。</div>' +
+      '<div class="kb-domains" id="egPresets"><span class="fm-empty">加载中…</span></div>' +
+      '<div id="egClasses"><div class="fm-empty">加载中…</div></div>' +
+      '<div class="fm-sub" style="margin-top:16px">出境日志（含被拒绝的）</div>' +
+      '<div class="kb-domains" id="egFilters"></div>' +
+      '<div id="egLogs"><div class="fm-empty">加载中…</div></div>',
+      '<span class="fm-sub" style="margin:0">日志只记目的地主机 / 字节数 / 脱敏摘要 —— 不存载荷全文。</span>',
+      { wide: true });
+    loadEgress();
+  }
+
+  function loadEgress() {
+    wbFetch('/api/egress/inventory')
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(renderEgressInventory)
+      .catch(function (e) {
+        var h = document.getElementById('egClasses');
+        if (h) h.innerHTML = '<div class="fm-empty">加载失败：' + esc(e.message) + '</div>';
+      });
+    loadEgressLog();
+  }
+
+  function renderEgressInventory(inv) {
+    var ph = document.getElementById('egPresets');
+    if (ph) {
+      var keys = Object.keys(inv.presets || {});
+      var cur = inv.lockdown ? 'lockdown' : '';
+      ph.innerHTML = keys.map(function (k) {
+        var p = inv.presets[k];
+        return '<button class="kb-domain' + (cur === k ? ' on' : '') + '" data-preset="' + escAttr(k) +
+          '" title="' + escAttr(p.desc) + '">' + esc(p.label) + '</button>';
+      }).join('');
+      $$('#egPresets .kb-domain').forEach(function (b) {
+        b.addEventListener('click', function () { applyEgressPreset(b.dataset.preset); });
+      });
+    }
+    var ch = document.getElementById('egClasses');
+    if (!ch) return;
+    ch.innerHTML = (inv.classes || []).map(function (c) {
+      var modes = c.modes_by_level || {};
+      var chips = ['public', 'internal', 'confidential'].map(function (lv) {
+        var m = modes[lv] || c.default_mode || 'allow';
+        var cls = m === 'deny' ? ' mkt-badge--crit' : (m === 'approval' ? ' mkt-badge--warn' : '');
+        return '<span class="mkt-badge' + cls + '">' + esc(EG_LEVEL_LABEL[lv] || lv) + '：' +
+          esc(EG_MODE_LABEL[m] || m) + '</span>';
+      }).join('');
+      return '<div class="mkt-card">' +
+        '<div class="mkt-head"><span class="mkt-name">' + esc(c.label || c['class']) + '</span>' +
+          '<span class="mkt-cat">' + esc(c['class']) + '</span></div>' +
+        '<div class="mkt-desc">载荷：' + esc(c.payload || '') + '</div>' +
+        '<div class="mkt-meta">' + chips + '</div>' +
+        '<div class="mkt-desc" style="opacity:.65;font-size:12px">收口点：' +
+          esc((c.sites || []).join(' · ')) + '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function applyEgressPreset(name) {
+    wbFetch('/api/egress/preset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name })
+    })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function () { loadEgress(); })
+      .catch(function (e) { alert('切换失败：' + (e.message || e)); });
+  }
+
+  function loadEgressLog() {
+    var host = document.getElementById('egLogs');
+    if (!host) return;
+    host.innerHTML = '<div class="fm-empty">加载中…</div>';
+    var qs = '?limit=60';
+    if (EG_STATE.cls) qs += '&dest_class=' + encodeURIComponent(EG_STATE.cls);
+    if (EG_STATE.decision) qs += '&decision=' + encodeURIComponent(EG_STATE.decision);
+    wbFetch('/api/egress/log' + qs)
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (d) {
+        var fh = document.getElementById('egFilters');
+        if (fh) {
+          var copts = [['', '全部类别'], ['llm', '大模型'], ['embedding', '向量化'],
+                       ['search', '联网检索'], ['external_rag', '外部RAG'], ['connector', '外部系统']];
+          var dopts = [['', '全部决策'], ['allow', '放行'], ['deny', '禁止'], ['pending', '待审批']];
+          fh.innerHTML = copts.map(function (o) {
+            return '<button class="kb-domain' + (EG_STATE.cls === o[0] ? ' on' : '') +
+              '" data-f="cls" data-v="' + escAttr(o[0]) + '">' + esc(o[1]) + '</button>';
+          }).join('') + '<span style="display:inline-block;width:12px"></span>' + dopts.map(function (o) {
+            return '<button class="kb-domain' + (EG_STATE.decision === o[0] ? ' on' : '') +
+              '" data-f="decision" data-v="' + escAttr(o[0]) + '">' + esc(o[1]) + '</button>';
+          }).join('');
+          $$('#egFilters .kb-domain').forEach(function (b) {
+            b.addEventListener('click', function () {
+              var f = b.dataset.f, v = b.dataset.v;
+              EG_STATE[f] = (EG_STATE[f] === v) ? '' : v;
+              loadEgressLog();
+            });
+          });
+        }
+        var logs = d.logs || [];
+        if (!logs.length) { host.innerHTML = '<div class="fm-empty">暂无出境记录</div>'; return; }
+        host.innerHTML = logs.map(function (l) {
+          var sev = l.decision === 'deny' ? ' mkt-badge--crit'
+                  : (l.decision === 'pending' ? ' mkt-badge--warn' : '');
+          var lv = l.level === 'confidential' ? ' mkt-badge--warn' : '';
+          return '<div class="mkt-card">' +
+            '<div class="mkt-head"><span class="mkt-name">' + esc(l.dest_host || '—') + '</span>' +
+              '<span class="mkt-badge' + sev + '">' + esc(l.decision) + '</span></div>' +
+            '<div class="mkt-desc">' + esc(l.summary || '(空载荷)') + '</div>' +
+            '<div class="mkt-meta">' +
+              '<span class="mkt-cat">' + esc(l.dest_class) + '</span>' +
+              '<span class="mkt-badge' + lv + '">' + esc(EG_LEVEL_LABEL[l.level] || l.level) + '</span>' +
+              '<span class="mkt-tag">' + (l.bytes_out || 0) + ' B</span>' +
+              '<span class="mkt-tag">' + esc(l.ts || '') + '</span>' +
+            '</div></div>';
+        }).join('');
+      })
+      .catch(function (e) { host.innerHTML = '<div class="fm-empty">加载失败：' + esc(e.message) + '</div>'; });
   }
 
   /* ---------------- HRM 人事管理系统（简道云迁移：49 表单数据驱动） ----------------
@@ -746,9 +1353,11 @@
     openFeatureModal('Agent 流程编排',
       '<div class="fm-row"><select class="fm-input" id="fmFlowSel"><option value="recruit">招聘 19 阶段</option></select>' +
       '<button class="fm-btn" id="fmFlowStart">启动</button>' +
-      '<button class="fm-btn secondary" id="fmFlowRun">跑到结束</button></div>' +
+      '<button class="fm-btn secondary" id="fmFlowRun">跑到结束</button>' +
+      '<button class="fm-btn secondary" id="fmFlowCanvas">可视化画布</button></div>' +
       '<div class="fm-log" id="fmFlowLog">未启动流程</div>',
       '<button class="fm-btn secondary" id="fmFlowClose">关闭</button>');
+    $('#fmFlowCanvas').addEventListener('click', function () { window.open('/flow-canvas.html', '_blank'); });
     var runId = '';
     wbFetch('/api/agent/flows')
       .then(function (r) { return r.json(); })
@@ -1201,6 +1810,8 @@
     var items = CONVERSATIONS.filter(function (c) {
       return !kw || c.title.indexOf(kw) >= 0;
     });
+    var cnt = $('#convGroupCount');
+    if (cnt) cnt.textContent = String(CONVERSATIONS.length);
     $('#convListBody').innerHTML = items.length ? items.map(function (c, i) {
       return '<div class="conv-item' + (i === 0 ? ' is-active' : '') + '" data-id="' + c.id + '">' +
              '<span class="conv-dot"></span><span class="conv-title">' + c.title + '</span></div>';
@@ -1778,7 +2389,240 @@
           toast('已调用技能：' + (title || id));
         }
       });
+      _appendSkillDrawerFooter();
     }).catch(function (e) { toast('技能列表加载失败：' + (e.message || e)); });
+  }
+
+  // 在技能抽屉底部追加"安装/管理"入口（openDrawer 无 footer 钩子，故追加到 body 末尾）
+  function _appendSkillDrawerFooter() {
+    var body = $('#toolDrawerBody');
+    if (!body || $('#skillInstallBtn')) return;
+    var foot = document.createElement('div');
+    foot.className = 'skill-drawer-foot';
+    foot.innerHTML =
+      '<button id="skillInstallBtn" class="fm-btn">＋ 安装 / 管理技能</button>' +
+      '<div class="skill-foot-hint">文件夹技能安装后会出现在上方列表，选中即注入对话。视频生成请在「连接器」挂 capability=video 的 MCP。</div>';
+    body.appendChild(foot);
+    $('#skillInstallBtn').addEventListener('click', openSkillInstall);
+  }
+
+  /* ---------------- 技能安装 / 管理弹窗 ----------------
+     三种来源：粘贴 SKILL.md 正文 / 本地含 SKILL.md 的文件夹 / https 链接（.git 或 .zip）。
+     已安装的文件夹技能可在本弹窗内卸载。后端见 api.py 的 /api/skills/install 与 /api/skills/{name}。 */
+  function openSkillInstall() {
+    var html =
+      '<div class="skill-install">' +
+        '<div class="si-tabs">' +
+          '<button class="si-tab on" data-m="paste">粘贴 SKILL.md</button>' +
+          '<button class="si-tab" data-m="path">本地路径</button>' +
+          '<button class="si-tab" data-m="url">https 链接</button>' +
+        '</div>' +
+        '<div class="si-pane" data-pane="paste">' +
+          '<label class="si-label">SKILL.md 正文（必须含 name + description 的 YAML frontmatter）</label>' +
+          '<textarea id="siPaste" class="fm-input si-ta" placeholder="---\nname: my-skill\ndescription: 一句话说明这个技能做什么\n---\n正文…"></textarea>' +
+          '<label class="si-label">技能名（可选，留空则从 frontmatter 解析）</label>' +
+          '<input id="siNamePaste" class="fm-input" placeholder="my-skill">' +
+        '</div>' +
+        '<div class="si-pane" data-pane="path" hidden>' +
+          '<label class="si-label">本地文件夹绝对路径（目录内需含 SKILL.md）</label>' +
+          '<input id="siPath" class="fm-input" placeholder="D:/skills/my-skill">' +
+          '<label class="si-label">技能名（可选）</label>' +
+          '<input id="siNamePath" class="fm-input" placeholder="my-skill">' +
+        '</div>' +
+        '<div class="si-pane" data-pane="url" hidden>' +
+          '<label class="si-label">https 链接：.git 仓库 或 .zip 压缩包</label>' +
+          '<input id="siUrl" class="fm-input" placeholder="https://github.com/owner/my-skill.git">' +
+          '<label class="si-label">技能名（可选，留空则从 URL 推断）</label>' +
+          '<input id="siNameUrl" class="fm-input" placeholder="my-skill">' +
+        '</div>' +
+        '<div class="si-err" id="siErr"></div>' +
+        '<div class="si-installed">' +
+          '<div class="si-sub">已安装文件夹技能（可卸载）</div>' +
+          '<div id="siList"><span class="tool-menu__empty">加载中…</span></div>' +
+        '</div>' +
+      '</div>';
+    openFeatureModal('安装 / 管理技能', html,
+      '<button class="my-modal__btn my-modal__btn--ghost" id="siCancel">关闭</button>' +
+      '<button class="my-modal__btn my-modal__btn--primary" id="siInstall">安装</button>');
+    $$('#fmBody .si-tab').forEach(function (t) {
+      t.addEventListener('click', function () {
+        $$('#fmBody .si-tab').forEach(function (x) { x.classList.remove('on'); });
+        t.classList.add('on');
+        var m = t.dataset.m;
+        $$('#fmBody .si-pane').forEach(function (p) { p.hidden = (p.dataset.pane !== m); });
+      });
+    });
+    $('#siInstall').addEventListener('click', doSkillInstall);
+    $('#siCancel').addEventListener('click', closeFeatureModal);
+    _renderInstalledSkills();
+  }
+
+  function doSkillInstall() {
+    var active = $('#fmBody .si-tab.on');
+    var method = active ? active.dataset.m : 'paste';
+    var value = '', name = '';
+    if (method === 'paste') { value = ($('#siPaste').value || '').trim(); name = ($('#siNamePaste').value || '').trim(); }
+    else if (method === 'path') { value = ($('#siPath').value || '').trim(); name = ($('#siNamePath').value || '').trim(); }
+    else { value = ($('#siUrl').value || '').trim(); name = ($('#siNameUrl').value || '').trim(); }
+    var err = $('#siErr');
+    err.textContent = '';
+    if (!value) { err.textContent = '请先填写 SKILL.md 内容 / 本地路径 / https 链接'; return; }
+    var btn = $('#siInstall');
+    btn.disabled = true;
+    wbFetch('/api/skills/install', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ method: method, value: value, name: name })
+    }).then(function (r) { return r.json().then(function (j) { return { r: r, j: j }; }); })
+      .then(function (res) {
+        btn.disabled = false;
+        if (!res.r.ok) { err.textContent = res.j.detail || '安装失败'; return; }
+        toast('已安装技能：' + res.j.name);
+        closeFeatureModal();
+        openSkillDrawer();   // 刷新抽屉，新技能立即出现在列表
+      })
+      .catch(function (e) {
+        btn.disabled = false;
+        err.textContent = (e.message || String(e)) + '';
+      });
+  }
+
+  function _renderInstalledSkills() {
+    var wrap = $('#siList');
+    if (!wrap) return;
+    wbFetch('/api/skills/list').then(function (r) { return r.json(); }).then(function (d) {
+      var list = (d && d.skills) || [];
+      var folder = list.filter(function (s) { return s.type === 'folder'; });
+      if (!folder.length) { wrap.innerHTML = '<span class="tool-menu__empty">暂无已安装的文件夹技能</span>'; return; }
+      wrap.innerHTML = folder.map(function (s) {
+        return '<div class="si-row"><span class="si-name">' + escHtml(s.name) + '</span>' +
+          '<span class="si-desc">' + escHtml((s.description || '').slice(0, 60)) + '</span>' +
+          '<button class="si-del" data-name="' + escAttr(s.name) + '">卸载</button></div>';
+      }).join('');
+      $$('#siList .si-del').forEach(function (b) {
+        b.addEventListener('click', function () { uninstallSkill(b.dataset.name); });
+      });
+    }).catch(function () { wrap.innerHTML = '<span class="tool-menu__empty">列表加载失败</span>'; });
+  }
+
+  function uninstallSkill(name) {
+    if (!window.confirm('确定卸载技能「' + name + '」？\n该操作会删除 skills/' + name + ' 目录，不可恢复。')) return;
+    wbFetch('/api/skills/' + encodeURIComponent(name), { method: 'DELETE' })
+      .then(function (r) { return r.json().then(function (j) { return { r: r, j: j }; }); })
+      .then(function (res) {
+        if (!res.r.ok) { toast('卸载失败：' + (res.j.detail || '')); return; }
+        toast('已卸载技能：' + name);
+        _renderInstalledSkills();
+        openSkillDrawer();
+      })
+      .catch(function (e) { toast('卸载失败：' + (e.message || String(e))); });
+  }
+
+  /* ---------------- Command（指令模板）：逆向自 ZCode Command 能力 ----------------
+     用户常用提示词一键插入；localStorage 持久化，按 token 隔离（多用户不串）。 */
+  var CMD_KEY = 'miniyuxi_commands';
+  var CMD_PRESETS = [
+    { id: 'preset_offboard', title: '生成离职面谈提纲', prompt: '请基于公司制度生成一份《离职面谈提纲》，覆盖离职原因、工作交接、保密与竞业限制、未结薪酬、情绪安抚等要点，输出可直接打印的清单。' },
+    { id: 'preset_social', title: '核算本月社保', prompt: '请按深圳最新社保/公积金缴费基数与比例，核算本月一名员工的社保与公积金个人与单位应缴金额，列出计算式与依据文件。' },
+    { id: 'preset_offer', title: '起草录用通知', prompt: '请起草一份《录用通知书（Offer）》，包含岗位、薪资结构、报到时间、试用期、生效条件等，使用公司公文风格。' },
+    { id: 'preset_probation', title: '试用期评估', prompt: '请生成一份《试用期员工评估表》及评估要点话术，覆盖胜任力、文化匹配、改进项，输出评分维度与结论模板。' },
+    { id: 'preset_policy', title: '制度问答', prompt: '请基于知识库检索相关制度并给出带 [编号] 引用的解答；资料未提及的明说「资料未提及」。' }
+  ];
+  function _cmdScope() { return CMD_KEY + '_' + (TOKEN || 'anon'); }
+  function getUserCommands() {
+    var raw; try { raw = JSON.parse(localStorage.getItem(_cmdScope()) || '[]'); } catch (e) { raw = []; }
+    if (!Array.isArray(raw)) raw = [];
+    return CMD_PRESETS.concat(raw);
+  }
+  function addUserCommand(title, prompt) {
+    var raw; try { raw = JSON.parse(localStorage.getItem(_cmdScope()) || '[]'); } catch (e) { raw = []; }
+    if (!Array.isArray(raw)) raw = [];
+    raw.push({ id: 'cmd_' + Date.now(), title: title, prompt: prompt });
+    try { localStorage.setItem(_cmdScope(), JSON.stringify(raw)); } catch (e) {}
+  }
+  function delUserCommand(id) {
+    var raw; try { raw = JSON.parse(localStorage.getItem(_cmdScope()) || '[]'); } catch (e) { raw = []; }
+    if (!Array.isArray(raw)) raw = [];
+    raw = raw.filter(function (c) { return c.id !== id; });
+    try { localStorage.setItem(_cmdScope(), JSON.stringify(raw)); } catch (e) {}
+  }
+  function activeComposer() {
+    var dock = $('#composerInputDock'), main = $('#composerInput');
+    if (dock && dock.offsetParent !== null) return dock;   // 对话态可见
+    return main || dock;
+  }
+  function getComposerText() {
+    var a = $('#composerInput'), b = $('#composerInputDock');
+    var ta = a ? (a.textContent || '') : '';
+    var tb = b ? (b.textContent || '') : '';
+    return (ta.trim() || tb.trim());
+  }
+  function openCmdDrawer() {
+    $('#toolDrawerTitle').textContent = '指令 / 技能';
+    var cmds = getUserCommands();
+    var cmdHtml = cmds.length ? cmds.map(function (c) {
+      var isPreset = String(c.id).indexOf('preset_') === 0;
+      return '<button class="tool-menu__option cmd-opt" data-kind="cmd" data-id="' + escAttr(c.id) + '" data-title="' + escAttr(c.title) + '">' +
+        '<span class="tool-menu__option-main">' +
+        '<span class="tool-menu__option-title">' + escHtml(c.title) + '</span>' +
+        '<span class="tool-menu__option-desc">' + escHtml(c.prompt) + '</span></span>' +
+        (isPreset ? '' : '<span class="cmd-del" data-id="' + escAttr(c.id) + '" title="删除指令">✕</span>') +
+        '</button>';
+    }).join('') : '<div class="tool-menu__empty">暂无自定义指令，可在下方「存为指令」保存当前输入框。</div>';
+    var body = $('#toolDrawerBody');
+    body.innerHTML =
+      '<div class="cmd-save">' +
+        '<input id="cmdSaveTitle" class="fm-input" placeholder="指令标题（如：生成周报）">' +
+        '<button class="fm-btn" id="cmdSaveBtn">存为指令</button>' +
+      '</div>' +
+      '<div class="tool-menu__group">我的指令（点击插入 · 预置不可删）</div>' + cmdHtml +
+      '<div class="tool-menu__group">技能（点击插入 /技能名）</div>' +
+      '<div id="cmdSkillWrap"><div class="tool-menu__empty">加载技能中…</div></div>';
+    $('#cmdSaveBtn').addEventListener('click', function () {
+      var title = ($('#cmdSaveTitle').value || '').trim();
+      var prompt = getComposerText();
+      if (!title) { toast('请填写指令标题'); return; }
+      if (!prompt) { toast('输入框为空，无可保存内容'); return; }
+      addUserCommand(title, prompt);
+      toast('已保存指令：' + title);
+      openCmdDrawer();
+    });
+    $$('#toolDrawerBody .cmd-del').forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        e.stopPropagation();
+        delUserCommand(el.dataset.id);
+        openCmdDrawer();
+      });
+    });
+    $$('#toolDrawerBody .cmd-opt').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var c = cmds.filter(function (x) { return x.id === el.dataset.id; })[0];
+        if (c) { insertAtCursor(activeComposer(), c.prompt); toast('已插入指令：' + c.title); }
+        closeToolMenu();
+      });
+    });
+    wbFetch('/api/skills/list').then(function (r) { return r.json(); }).then(function (d) {
+      var list = (d && d.skills) || [];
+      var wrap = $('#cmdSkillWrap');
+      if (!wrap) return;
+      if (!list.length) { wrap.innerHTML = '<div class="tool-menu__empty">暂无技能</div>'; return; }
+      wrap.innerHTML = list.map(function (s) {
+        var ttl = ('question' in s ? s.question : (s.name || s.id));
+        var sub = (s.tags && s.tags.join(', ')) || '';
+        var id = s.name || s.id;
+        return '<button class="tool-menu__option" data-id="' + escAttr(id) + '" data-title="' + escAttr(ttl) + '">' +
+          '<span class="tool-menu__option-main"><span class="tool-menu__option-title">' + escHtml(ttl) + '</span>' +
+          (sub ? '<span class="tool-menu__option-desc">' + escHtml(sub) + '</span>' : '') + '</span></button>';
+      }).join('');
+      $$('#cmdSkillWrap .tool-menu__option').forEach(function (sel) {
+        sel.addEventListener('click', function () {
+          insertAtCursor(activeComposer(), '/' + (sel.dataset.title || sel.dataset.id) + ' ');
+          toast('已调用技能：' + (sel.dataset.title || sel.dataset.id));
+          closeToolMenu();
+        });
+      });
+    }).catch(function () { var w = $('#cmdSkillWrap'); if (w) w.innerHTML = '<div class="tool-menu__empty">技能加载失败</div>'; });
+    $('#toolMenu').hidden = true;
+    $('#toolDrawer').hidden = false;
   }
 
   function openConnectorDrawer() {
@@ -1846,7 +2690,18 @@
     // 输入联动
     ['#composerInput', '#composerInputDock'].forEach(function (sel) {
       var el = $(sel);
-      el.addEventListener('input', syncSend);
+      // 对齐 WorkBuddy：键入 @ / 即唤起对应选择器（原站是键入触发，不是按钮触发）
+      el.addEventListener('input', function (e) {
+        syncSend();
+        var d = e.data;
+        if (d !== '@' && d !== '/') return;
+        var txt = el.textContent || '';
+        if (txt.slice(-1) !== d) return;
+        el.textContent = txt.slice(0, -1);      // 吃掉触发符，由选择器回填完整引用
+        placeCaretEnd(el);
+        syncSend();
+        if (d === '@') openRefFileDrawer(); else openCmdDrawer();
+      });
       el.addEventListener('keyup', syncSend);
       el.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -1967,6 +2822,37 @@
       openToolMenu(btn);
     }
     $('#btnToolMenu').addEventListener('click', function (e) { e.stopPropagation(); toggleToolMenu(this); });
+
+    // 对齐 WorkBuddy：输入框下方「选择工作空间 ∨」「允许完全访问 ∨」
+    var wsBtn = $('#btnWorkspace');
+    if (wsBtn) {
+      wsBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        // MiniYuxi 无「工作空间」建模，这里如实反映当前租户，不造多空间假数据
+        var t = '';
+        try { t = localStorage.getItem('miniyuxi_tenant') || ''; } catch (err) {}
+        toast(t ? ('当前工作空间：' + t) : '当前为默认工作空间（单租户模式）');
+      });
+    }
+    var acBtn = $('#btnAccessChip');
+    if (acBtn) {
+      // 与工具菜单里的「允许完全访问」开关联动，避免两处状态不一致
+      acBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleToolMenu($('#btnToolMenu')); });
+    }
+
+    // chips 行尾：搜索（打开技能与指令抽屉）/ 右移（横向滚动一屏）
+    var chipSearch = $('#btnChipSearch');
+    if (chipSearch) chipSearch.addEventListener('click', function () { openSkillDrawer(); });
+    var chipNext = $('#btnChipNext');
+    if (chipNext) {
+      chipNext.addEventListener('click', function () {
+        var list = $('#quickActions');
+        if (!list) return;
+        var max = list.scrollWidth - list.clientWidth;
+        var next = list.scrollLeft >= max - 4 ? 0 : list.scrollLeft + Math.max(160, list.clientWidth * 0.8);
+        list.scrollTo({ left: next, behavior: 'smooth' });
+      });
+    }
     $('#btnToolMenuDock').addEventListener('click', function (e) { e.stopPropagation(); toggleToolMenu(this); });
 
     // 菜单项点击分发
@@ -2021,6 +2907,7 @@
       if (saved === 'dark') { document.body.classList.remove('light'); document.body.classList.add('dark'); }
     } catch (e) {}
     renderNav();
+    renderNavRail();          // 左侧主导航（对齐 WorkBuddy 中文桌面版 7 项）
     renderSceneTabs();
     renderQuickActions();
     renderConversations();
@@ -2038,6 +2925,295 @@
     } else if (fu) {
       fu.textContent = '未登录';
     }
+  }
+
+  /* ---------------- 业务集成：MiniYuxi × RuoYi-Office-Vben 适配器 ----------------
+     左：MCP 连接器（增/健康）；右：4 模块工具面（HRM/CRM/ERP/OA），风险徽标 + 参数表单 + 调用；
+     命中 HITL 审批门时弹审批卡，批准后续跑提交（B2 防御纵深：高危工具仅审批后才真正提交）。 */
+  var BIZ = { connectors: [], tools: [], module: 'all' };
+  var BIZ_MODULES = [
+    { key: 'hrm', label: 'HRM 人事' },
+    { key: 'crm', label: 'CRM 客户' },
+    { key: 'erp', label: 'ERP 供应链' },
+    { key: 'oa',  label: 'OA 办公' }
+  ];
+
+  function bizRiskClass(risk) {
+    if (risk === 'high_risk') return 'biz-risk biz-risk--high';
+    if (risk === 'warn') return 'biz-risk biz-risk--warn';
+    return 'biz-risk biz-risk--info';
+  }
+  function bizRiskLabel(risk) {
+    if (risk === 'high_risk') return '高危';
+    if (risk === 'warn') return '中风险';
+    return '低风险';
+  }
+  function bizModuleOf(name) {
+    var m = /^mcp\.(hrm|crm|erp|oa)\./.exec(name || '');
+    return m ? m[1] : '';
+  }
+  function bizBtnSel(name) {
+    var v = (window.CSS && CSS.escape) ? CSS.escape(name) : name;
+    return '#bizTools [data-call="' + v + '"]';
+  }
+
+  function openBizPanel() {
+    openFeatureModal('业务集成 · RuoYi 适配器',
+      '<div class="biz-wrap">' +
+        '<div class="biz-side">' +
+          '<div class="biz-side__head">连接器（MCP）</div>' +
+          '<div id="bizConns"><span class="fm-empty">加载中…</span></div>' +
+          '<details class="biz-add" id="bizAddBox">' +
+            '<summary>＋ 添加 MCP 连接器</summary>' +
+            '<div class="biz-form">' +
+              '<input id="bizNewName" class="fm-input" placeholder="名称（如：ruoyi生产）">' +
+              '<input id="bizNewEndpoint" class="fm-input" placeholder="SSE 地址（http://host:port/sse）">' +
+              '<input id="bizNewToken" class="fm-input" placeholder="Bearer Token（可选）" autocomplete="off">' +
+              '<input id="bizNewCap" class="fm-input" placeholder="能力标记 capability（可选，填 video 即作视频生成连接器）">' +
+              '<button class="fm-btn" id="bizAddConn">保存连接器</button>' +
+              '<span class="biz-hint">保存后点「刷新工具目录」拉取远端工具。</span>' +
+            '</div>' +
+          '</details>' +
+          '<button class="fm-btn secondary" id="bizRefresh">刷新工具目录</button>' +
+        '</div>' +
+        '<div class="biz-main">' +
+          '<div class="kb-domains" id="bizModules"></div>' +
+          '<div id="bizTools"><span class="fm-empty">加载中…</span></div>' +
+        '</div>' +
+      '</div>',
+      '<span class="fm-sub" style="margin:0">高危工具默认仅预览，须经 HITL 审批（审批卡）确认后才真正提交业务单据；' +
+      '响应敏感字段（身份证/手机/邮箱/银行卡）已由适配器脱敏。</span>',
+      { wide: true });
+    $('#bizAddConn').addEventListener('click', bizAddConnector);
+    $('#bizRefresh').addEventListener('click', function () { bizLoad(true); });
+    bizLoad(false);
+  }
+
+  function bizLoad(refresh) {
+    var q = refresh ? '?refresh=1' : '';
+    Promise.all([
+      wbFetch('/api/connectors').then(function (r) { return r.json(); }),
+      wbFetch('/api/tools/list' + q).then(function (r) { return r.json(); })
+    ]).then(function (res) {
+      BIZ.connectors = (res[0] && res[0].connectors) || [];
+      BIZ.tools = ((res[1] && res[1].tools) || []).filter(function (t) {
+        return t.toolset === 'mcp-adapter';
+      });
+      bizRenderConns();
+      bizRenderModules();
+      bizRenderTools();
+    }).catch(function (e) {
+      var h = document.getElementById('bizTools');
+      if (h) h.innerHTML = '<div class="fm-empty">加载失败：' + esc(e.message) + '</div>';
+    });
+  }
+
+  function bizRenderConns() {
+    var box = document.getElementById('bizConns');
+    if (!box) return;
+    var mc = BIZ.connectors.filter(function (c) { return c.kind === 'mcp'; });
+    if (!mc.length) {
+      box.innerHTML = '<div class="fm-empty">暂无 MCP 连接器。展开上方「＋ 添加」新建一个，' +
+        '指向运行中的 RuoYi 适配器 SSE 地址。</div>';
+      return;
+    }
+    box.innerHTML = mc.map(function (c) {
+      var st = c.status || 'unknown';
+      var cls = st === 'ready' ? 'biz-st biz-st--ok'
+              : (st === 'disabled' ? 'biz-st biz-st--off'
+              : (st === 'partial' ? 'biz-st biz-st--warn' : 'biz-st biz-st--bad'));
+      var cfg = {};
+      try { cfg = JSON.parse(c.config_json || '{}'); } catch (e) {}
+      return '<div class="biz-conn">' +
+        '<div class="biz-conn__top"><b>' + esc(c.name) + '</b>' +
+          '<span class="' + cls + '">' + esc(st) + '</span></div>' +
+        '<div class="biz-conn__ep">' + esc(cfg.endpoint || '（无 endpoint）') + '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function bizAddConnector() {
+    var name = $('#bizNewName').value.trim();
+    var ep = $('#bizNewEndpoint').value.trim();
+    var tok = $('#bizNewToken').value.trim();
+    var cap = ($('#bizNewCap') ? $('#bizNewCap').value.trim() : '');
+    if (!name || !ep) { toast('请填写名称与 SSE 地址'); return; }
+    var config = { transport: 'sse', endpoint: ep };
+    if (tok) config.token = tok;
+    if (cap) config.capability = cap;
+    wbFetch('/api/connectors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, kind: 'mcp', config: config })
+    }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function () {
+        toast('连接器已保存');
+        var box = $('#bizAddBox'); if (box) box.open = false;
+        $('#bizNewName').value = ''; $('#bizNewEndpoint').value = ''; $('#bizNewToken').value = '';
+        if ($('#bizNewCap')) $('#bizNewCap').value = '';
+        bizProbeHealth();
+      })
+      .catch(function (e) { alert('保存失败：' + (e.message || e)); });
+  }
+
+  function bizProbeHealth() {
+    wbFetch('/api/connectors/health', { method: 'POST' })
+      .then(function (r) { return r.json(); })
+      .then(function () { bizLoad(false); })
+      .catch(function () {});
+  }
+
+  function bizRenderModules() {
+    var box = document.getElementById('bizModules');
+    if (!box) return;
+    var chips = [{ key: 'all', label: '全部' }].concat(BIZ_MODULES);
+    box.innerHTML = chips.map(function (m) {
+      return '<button class="kb-domain' + (BIZ.module === m.key ? ' on' : '') +
+        '" data-mod="' + escAttr(m.key) + '">' + esc(m.label) + '</button>';
+    }).join('');
+    $$('#bizModules .kb-domain').forEach(function (b) {
+      b.addEventListener('click', function () { BIZ.module = b.dataset.mod; bizRenderTools(); });
+    });
+  }
+
+  function bizRenderTools() {
+    var box = document.getElementById('bizTools');
+    if (!box) return;
+    if (!BIZ.tools.length) {
+      box.innerHTML = '<div class="fm-empty">未发现 mcp-adapter 工具。请确认：① 已添加并指向运行中的适配器；' +
+        '② 点过「刷新工具目录」。适配器未运行时此处为空属正常。</div>';
+      return;
+    }
+    var list = BIZ.tools.filter(function (t) {
+      return BIZ.module === 'all' || bizModuleOf(t.name) === BIZ.module;
+    });
+    if (!list.length) { box.innerHTML = '<div class="fm-empty">该模块暂无工具。</div>'; return; }
+    box.innerHTML = list.map(function (t) {
+      var props = (t.schema && t.schema.properties) || {};
+      var req = (t.schema && t.schema.required) || [];
+      var fields = Object.keys(props).map(function (k) {
+        var ty = (props[k].type || 'string');
+        var ph = props[k].description || ('参数 ' + k);
+        var inp = ty === 'object'
+          ? '<textarea id="arg_' + escAttr(t.name) + '_' + escAttr(k) + '" class="fm-input" rows="3" placeholder="JSON 对象，如 {&quot;a&quot;:1}"></textarea>'
+          : '<input id="arg_' + escAttr(t.name) + '_' + escAttr(k) + '" class="fm-input" ' +
+            'type="' + (ty === 'number' || ty === 'integer' ? 'number' : 'text') + '" placeholder="' + escAttr(ph) + '">';
+        var star = req.indexOf(k) >= 0 ? ' <span class="biz-req">*</span>' : '';
+        return '<label class="biz-field"><span>' + esc(k) + star + '</span>' + inp + '</label>';
+      }).join('');
+      var desc = (t.description || '').replace(/^\[MCP\]\s*/, '');
+      return '<div class="mkt-card biz-tool">' +
+        '<div class="mkt-head"><span class="mkt-name">' + esc(t.name) + '</span>' +
+          '<span class="' + bizRiskClass(t.risk) + '">' + bizRiskLabel(t.risk) +
+          (t.requires_approval ? ' · 需审批' : '') + '</span></div>' +
+        '<div class="mkt-desc">' + esc(desc) + '</div>' +
+        (fields || '<div class="biz-nofield">无参数</div>') +
+        '<div class="biz-tool__foot">' +
+          '<button class="fm-btn" data-call="' + escAttr(t.name) + '">' +
+            (t.risk === 'high_risk' ? '预览 / 提交' : '调用') + '</button>' +
+          '<span class="biz-tool__res" id="res_' + escAttr(t.name) + '"></span>' +
+        '</div></div>';
+    }).join('');
+    $$('#bizTools [data-call]').forEach(function (b) {
+      b.addEventListener('click', function () { bizCall(b.dataset.call); });
+    });
+  }
+
+  function bizCollectArgs(name) {
+    var t = BIZ.tools.filter(function (x) { return x.name === name; })[0];
+    var props = (t && t.schema && t.schema.properties) || {};
+    var args = {};
+    Object.keys(props).forEach(function (k) {
+      var el = document.getElementById('arg_' + name + '_' + k);
+      if (!el) return;
+      var raw = el.value.trim();
+      if (!raw) return;
+      var ty = props[k].type || 'string';
+      if (ty === 'number' || ty === 'integer') {
+        args[k] = Number(raw);
+      } else if (ty === 'object') {
+        try { args[k] = JSON.parse(raw); } catch (e) { throw new Error('参数 ' + k + ' 不是合法 JSON 对象'); }
+      } else {
+        args[k] = raw;
+      }
+    });
+    return args;
+  }
+
+  function bizShowResult(name, html, isErr) {
+    var el = document.getElementById('res_' + name);
+    if (!el) return;
+    el.innerHTML = '<span class="biz-res' + (isErr ? ' biz-res--err' : '') + '">' + html + '</span>';
+  }
+
+  function bizCall(name, approvalId) {
+    var args;
+    try { args = bizCollectArgs(name); } catch (e) { toast(e.message); return; }
+    var payload = { name: name, args: args, session_id: 'web' };
+    if (approvalId) payload.approval_id = approvalId;
+    var btn = document.querySelector(bizBtnSel(name));
+    if (btn) btn.disabled = true;
+    wbFetch('/api/tools/call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (btn) btn.disabled = false;
+        if (d && d.status === 'pending') { bizShowHitl(name, args, d.approval_id, d.tool_name); return; }
+        var txt = (d && (d.result !== undefined ? d.result : d.error)) || d;
+        var s = (typeof txt === 'string') ? txt : JSON.stringify(txt, null, 2);
+        bizShowResult(name, esc(s).slice(0, 1400), !!(d && d.error));
+      })
+      .catch(function (e) {
+        if (btn) btn.disabled = false;
+        bizShowResult(name, esc(e.message), true);
+      });
+  }
+
+  function bizShowHitl(name, args, aid, toolName) {
+    var html =
+      '<div class="biz-hitl">' +
+        '<div class="biz-hitl__title">⚠ HITL 审批：' + esc(toolName || name) + '</div>' +
+        '<div class="biz-hitl__sub">该调用将真正提交业务单据，需人工确认。</div>' +
+        '<pre class="biz-hitl__args">' + esc(JSON.stringify(args, null, 2)) + '</pre>' +
+        '<div class="biz-hitl__foot">' +
+          '<button class="fm-btn" id="hitlApprove">确认提交</button>' +
+          '<button class="fm-btn secondary" id="hitlReject">拒绝</button>' +
+        '</div>' +
+        '<div class="biz-hitl__res" id="hitlRes"></div>' +
+      '</div>';
+    bizShowResult(name, html, false);
+    $('#hitlApprove').addEventListener('click', function () {
+      $('#hitlApprove').disabled = true; $('#hitlReject').disabled = true;
+      wbFetch('/api/approvals/' + encodeURIComponent(aid) + '/decide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approve: true, by: 'web' })
+      }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function () {
+          var r2 = document.getElementById('hitlRes');
+          if (r2) r2.textContent = '已批准，正在提交…';
+          bizCall(name, aid);
+        })
+        .catch(function (e) {
+          var r2 = document.getElementById('hitlRes');
+          if (r2) r2.textContent = '审批失败：' + e.message;
+          $('#hitlApprove').disabled = false; $('#hitlReject').disabled = false;
+        });
+    });
+    $('#hitlReject').addEventListener('click', function () {
+      wbFetch('/api/approvals/' + encodeURIComponent(aid) + '/decide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approve: false, by: 'web' })
+      }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function () {
+          bizShowResult(name, '<span class="biz-res biz-res--err">已拒绝该调用。</span>', true);
+          var b2 = document.querySelector(bizBtnSel(name)); if (b2) b2.disabled = false;
+        })
+        .catch(function (e) { bizShowResult(name, esc(e.message), true); });
+    });
   }
 
   if (document.readyState === 'loading') {

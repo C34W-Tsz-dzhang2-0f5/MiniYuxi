@@ -4,15 +4,20 @@
 """
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, Body
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile, Body
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from core import agent, auth, config, db, rag
+# 版本号唯一来源：core/version.py。**不要再在这里写版本字面量**（历史上这里写过 0.1.0，
+# 与 run.py/pyproject.toml 的 0.2.0 漂移，导致 /api/health 对外报错版本）。
+# 一致性由 scripts/check_version_consistency.py 强制校验。
+from core.version import __version__ as APP_VERSION
 import core.gateway as gateway
 import core.usage as usage
 import core.tools_registry as tools_registry
@@ -54,6 +59,10 @@ import core.resume_screening as resume_screening
 import core.backup as backup
 # ---- HRM 人事管理系统（简道云逆向迁移）----
 import core.hrm as hrm
+# ---- 办公操作面（Univer 办公套件 · 纯本地存档）----
+import core.office as office
+# ---- 数据出境管控（企业级定位落地：出境开关 + 出境日志）----
+import core.egress as egress
 
 # ---- 运行时建表（绕开冻结的 db.py），失败不阻塞主链路 ----
 try:
@@ -84,6 +93,8 @@ try:
     labor_relations.init()
     salary_records.init()
     hrm.init()  # HRM 人事管理系统（简道云逆向迁移）：49 张表单运行时建表
+    office.init()  # 办公操作面：office_docs 表（Univer 快照本地存档）
+    egress.init()  # 数据出境管控：egress_policy / egress_log 表
 except Exception:
     pass
 
@@ -93,7 +104,7 @@ UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
-app = FastAPI(title="MiniYuxi", version="0.1.0", description="轻量自研 HR 智能体平台（原生进程 · 零外部服务）")
+app = FastAPI(title="MiniYuxi", version=APP_VERSION, description="轻量自研 HR 智能体平台（原生进程 · 零外部服务）")
 
 
 # ---------------- 鉴权依赖 ----------------
@@ -128,6 +139,7 @@ class DocIn(BaseModel):
     title: str
     text: str
     source: str = ""
+    category: str = ""  # 制度地图分类：招聘/薪酬/社保/离职/绩效/合同/合规/其他
 
 
 class SearchIn(BaseModel):
@@ -190,7 +202,7 @@ def health():
     return {
         "ok": True,
         "service": "MiniYuxi",
-        "version": "0.1.0",
+        "version": APP_VERSION,
         "storage": {"db": "SQLite", "vector": f"sqlite-vec {db.vec_version()}", "fts": "FTS5"},
         "modes": {"llm": "online" if config.llm_enabled() else "offline-fallback",
                   "embedding": "online" if config.emb_enabled() else "bm25-only"},
@@ -337,7 +349,7 @@ def kb_list(p: auth.Principal = Depends(need("kb.read"))):
 
 @app.post("/api/kb/docs")
 def kb_add(body: DocIn, p: auth.Principal = Depends(need("kb.write"))):
-    res = rag.add_document(p.tenant_id, body.title, body.text, body.source)
+    res = rag.add_document(p.tenant_id, body.title, body.text, body.source, body.category)
     db.audit(p.tenant_id, p.username, "kb.add", res.get("doc_id", ""), body.title)
     return res
 
@@ -349,13 +361,26 @@ def kb_del(doc_id: str, p: auth.Principal = Depends(need("kb.delete"))):
     return {"ok": True, "removed_chunks": n}
 
 
+@app.get("/api/kb/docs/{doc_id}")
+def kb_doc(doc_id: str, p: auth.Principal = Depends(need("kb.read"))):
+    """按 doc_id 取文档元数据 + 全文（供引用跳转 / 原文查看）。"""
+    row = db.connect().execute(
+        "SELECT id,title,source,category,n_chunks,created_at FROM docs WHERE tenant_id=? AND id=?",
+        (p.tenant_id, doc_id),
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, "文档不存在")
+    text = rag.get_document_text(p.tenant_id, doc_id, max_chars=8000)
+    return dict(row) | {"text": text}
+
+
 @app.post("/api/kb/search")
 def kb_search(body: SearchIn, p: auth.Principal = Depends(need("kb.read"))):
     return rag.search(p.tenant_id, body.query, body.top_k)
 
 
 @app.post("/api/kb/upload")
-async def kb_upload(file: UploadFile = File(...), p: auth.Principal = Depends(need("kb.write"))):
+async def kb_upload(file: UploadFile = File(...), category: str = Form(""), p: auth.Principal = Depends(need("kb.write"))):
     """制度文档导入：支持 .docx/.pdf/.txt/.md，入库 chunks≥1 且可被检索命中。
     必须先过鉴权（kb.write），并强制带 tenant_id，否则视为越权漏洞。"""
     raw = await file.read()
@@ -381,7 +406,7 @@ async def kb_upload(file: UploadFile = File(...), p: auth.Principal = Depends(ne
             os.unlink(tmp.name)
         except OSError:
             pass
-    res = rag.add_document(p.tenant_id, file.filename or "未命名文档", text, file.filename or "")
+    res = rag.add_document(p.tenant_id, file.filename or "未命名文档", text, file.filename or "", category or "")
     db.audit(p.tenant_id, p.username, "kb.upload", res.get("doc_id", ""), file.filename or "")
     return res
 
@@ -422,6 +447,105 @@ def chat(body: ChatIn, stream: bool = False, p: auth.Principal = Depends(need("c
     )
 
 
+# ---------------- 域1 进程级 Agent 运行时管理器（目标任务书 2.1 域1）----------------
+from core import agent_runtime
+from core import flow_store
+from core import experts_manifest
+
+
+class AgentSessionIn(BaseModel):
+    session_id: str
+    system: str = ""
+    thread_id: str = ""
+
+
+class AgentSubmitIn(BaseModel):
+    prompt: str
+
+
+class FlowSaveIn(BaseModel):
+    id: str = ""
+    name: str
+    definition: object  # dict/list：{nodes, edges, meta}
+
+
+@app.post("/api/agent/session")
+def agent_session_create(body: AgentSessionIn, p: auth.Principal = Depends(need("chat"))):
+    """创建（或取回）一个长会话；进程级 AgentManager 管理并发与保活。"""
+    s = agent_runtime.AgentManager.create(
+        body.session_id, p.tenant_id,
+        thread_id=body.thread_id or None, system=body.system or None,
+    )
+    return {"ok": True, **s.to_dict()}
+
+
+@app.post("/api/agent/session/{sid}/submit")
+def agent_session_submit(sid: str, body: AgentSubmitIn, p: auth.Principal = Depends(need("chat"))):
+    """提交一轮（线程池异步执行，立即返回；客户端轮询 /api/agent/session/{sid} 取结果）。"""
+    fut = agent_runtime.AgentManager.submit(sid, body.prompt)
+    if fut is None:
+        s = agent_runtime.AgentManager.get(sid)
+        return {"ok": False, "reason": "session_not_found_or_running",
+                "status": s.status if s else None}
+    return {"ok": True, "status": "running", "session_id": sid}
+
+
+@app.get("/api/agent/session/{sid}")
+def agent_session_get(sid: str, p: auth.Principal = Depends(need("chat"))):
+    s = agent_runtime.AgentManager.get(sid)
+    if not s:
+        return JSONResponse(status_code=404, content={"detail": "session not found"})
+    d = s.to_dict()
+    d["last_result"] = s.last_result
+    return d
+
+
+@app.post("/api/agent/session/{sid}/cancel")
+def agent_session_cancel(sid: str, p: auth.Principal = Depends(need("chat"))):
+    ok = agent_runtime.AgentManager.cancel(sid)
+    s = agent_runtime.AgentManager.get(sid)
+    return {"ok": bool(ok), "status": s.status if s else None}
+
+
+@app.get("/api/agent/sessions")
+def agent_sessions_list(p: auth.Principal = Depends(need("chat"))):
+    return {"sessions": agent_runtime.AgentManager.list_sessions(p.tenant_id)}
+
+
+# ---------------- 流程画布持久化（域13：Dify 风格可视化编排的存储底座）----------------
+@app.post("/api/flow/save")
+def flow_save(body: FlowSaveIn, p: auth.Principal = Depends(need("chat"))):
+    """保存（upsert）一个画布编排的 flow 定义。"""
+    fid = flow_store.save_flow(body.id, p.tenant_id, body.name, body.definition)
+    return {"ok": True, "id": fid}
+
+
+@app.get("/api/flow/list")
+def flow_list(p: auth.Principal = Depends(need("chat"))):
+    return {"flows": flow_store.list_flows(p.tenant_id)}
+
+
+@app.get("/api/flow/{fid}")
+def flow_get(fid: str, p: auth.Principal = Depends(need("chat"))):
+    f = flow_store.get_flow(fid, p.tenant_id)
+    if not f:
+        return JSONResponse(status_code=404, content={"detail": "flow not found"})
+    return f
+
+
+@app.delete("/api/flow/{fid}")
+def flow_delete(fid: str, p: auth.Principal = Depends(need("chat"))):
+    n = flow_store.delete_flow(fid, p.tenant_id)
+    return {"ok": bool(n), "deleted": n}
+
+
+# ---------------- 专家市场 manifest（域15：Skills → 可发布市场清单）----------------
+@app.get("/api/experts/manifest")
+def experts_manifest_get(p: auth.Principal = Depends(need("chat"))):
+    """返回专家市场清单：分类聚合 + 逐个专家条目（复用 skills_catalog 契约）。"""
+    return experts_manifest.build_manifest()
+
+
 # ---------------- A 方案：HR 知识库问答入口（原生 RAG + 外部平台适配）----------------
 @app.post("/api/rag/ask")
 def rag_ask(body: RagAskIn, p: auth.Principal = Depends(need("kb.read"))):
@@ -444,16 +568,133 @@ def gateway_models(p: auth.Principal = Depends(need("chat"))):
 class ToolCallIn(BaseModel):
     name: str
     args: dict = {}
+    approval_id: str = ""      # HITL 续跑：已 approved 的审批单 id（首次调用为空）
+    session_id: str = "web"    # 审计 / 审批 requested_by 来源
 
 
 @app.get("/api/tools/list")
-def tools_list(p: auth.Principal = Depends(need("chat"))):
+def tools_list(refresh: bool = False, p: auth.Principal = Depends(need("chat"))):
+    if refresh:
+        tools_registry.invalidate_mcp_cache()
     return {"tools": tools_registry.list_tools()}
 
 
 @app.post("/api/tools/call")
 def tools_call(body: ToolCallIn, p: auth.Principal = Depends(need("chat"))):
-    return tools_registry.call_tool(body.name, body.args, tenant_id=p.tenant_id)
+    """工具调用统一走治理管线 run_tool_governed：
+
+    - 普通 / 无需审批工具：等价于执行并返回 {name,toolset,result}（含 hardline 安全兜底 + 审计）。
+    - requires_approval=True 工具：首次调用返回 {status:'pending', approval_id}，
+      前端据此弹 HITL 卡 → /api/approvals/{aid}/decide → 再带 approval_id 调用本端点，
+      此处识别已 approved 后跳过审批门直接执行（HITL 闭环，守住 high_risk 红线）。
+    """
+    return tools_registry.run_tool_governed(
+        body.name, body.args, tenant_id=p.tenant_id,
+        session_id=body.session_id or p.username,
+        approved_aid=body.approval_id or None,
+    )
+
+
+# ---------------- T2+ 本地工具市场（抄 treg 理念 · 本地化）----------------
+#  合规红线：所有市场接口只读本地 SQLite + 内存注册表，不向任何远端服务注入凭据。
+#  不复制 treg 的 OpenRouter-for-tools 形态，也不引入远端工具目录拉取。
+@app.get("/api/market/list")
+def market_list(category: str = "", tag: str = "", q: str = "",
+                enabled_only: bool = False,
+                p: auth.Principal = Depends(need("chat"))):
+    return {
+        "tools": tools_registry.list_market(category=category, tag=tag, q=q, enabled_only=enabled_only),
+        "categories": tools_registry.list_categories(),
+    }
+
+
+@app.get("/api/market/{name}")
+def market_get(name: str, p: auth.Principal = Depends(need("chat"))):
+    d = tools_registry.get_market(name)
+    if not d:
+        raise HTTPException(404, "工具不存在")
+    return d
+
+
+@app.post("/api/market/{name}/toggle")
+def market_toggle(name: str, enabled: bool = True,
+                  p: auth.Principal = Depends(need("agent.run"))):
+    if not tools_registry.toggle_market(name, enabled):
+        raise HTTPException(404, "工具不存在")
+    db.audit(p.tenant_id, p.username, "market.toggle", name, "1" if enabled else "0")
+    return {"ok": True, "name": name, "enabled": enabled}
+
+
+# ---------------- 数据出境管控（企业级定位落地：出境开关 + 出境日志）----------------
+#  定位更正为「数据可以出本机」后，企业级的两条硬要求：
+#    ① 出境可按**数据分级**配置（allow / deny / approval 三态，非全开全关）；
+#    ② 出境行为**可审计**（含被拒绝的）。
+#  闸门本体在 core/egress.guard()，由 5 类目的地的 10 个出口调用；此处只做策略读写与日志查询。
+class EgressPolicyIn(BaseModel):
+    policy: dict = {}
+
+
+class EgressPresetIn(BaseModel):
+    name: str
+
+
+class EgressTextIn(BaseModel):
+    text: str = ""
+    dest_class: str = "llm"
+
+
+@app.get("/api/egress/inventory")
+def egress_inventory(p: auth.Principal = Depends(need("chat"))):
+    """出境点自描述：5 类目的地 + 各自收口点 + 每级数据的生效模式。"""
+    return egress.inventory()
+
+
+@app.get("/api/egress/policy")
+def egress_get_policy(p: auth.Principal = Depends(need("chat"))):
+    return {"policy": egress.get_policy(), "classes": list(egress.CLASSES),
+            "modes": list(egress.MODES), "levels": list(egress.LEVELS)}
+
+
+@app.post("/api/egress/policy")
+def egress_set_policy(body: EgressPolicyIn, p: auth.Principal = Depends(need("tenant.manage"))):
+    pol = egress.set_policy(body.policy or {})
+    db.audit(p.tenant_id, p.username, "egress.policy.set", "policy",
+             json.dumps(pol, ensure_ascii=False)[:400])
+    return {"ok": True, "policy": pol}
+
+
+@app.post("/api/egress/preset")
+def egress_apply_preset(body: EgressPresetIn, p: auth.Principal = Depends(need("tenant.manage"))):
+    """一键套用姿态预设：balanced / strict / lockdown。"""
+    try:
+        pol = egress.apply_preset(body.name)
+    except KeyError as exc:
+        raise HTTPException(400, str(exc))
+    db.audit(p.tenant_id, p.username, "egress.preset", body.name, "")
+    return {"ok": True, "policy": pol}
+
+
+@app.get("/api/egress/log")
+def egress_list_log(limit: int = 100, dest_class: str = "", decision: str = "",
+                    p: auth.Principal = Depends(need("audit.read"))):
+    """出境日志（倒序）+ 汇总统计。日志只含脱敏摘要，**不含载荷全文**。"""
+    return {"logs": egress.list_log(limit=limit, dest_class=dest_class, decision=decision),
+            "stats": egress.stats()}
+
+
+@app.post("/api/egress/classify")
+def egress_classify(body: EgressTextIn, p: auth.Principal = Depends(need("chat"))):
+    """试分级 + 干跑：给定文本，看会判成哪一级、各类目的地会走什么模式。
+    纯计算、无副作用（不写日志、不建审批卡），便于企业调策略规则。"""
+    lvl = egress.classify(body.text)
+    return {
+        "level": lvl,
+        "redacted_preview": egress.redact(body.text),
+        "dest_class": body.dest_class,
+        "mode": egress.effective_mode(body.dest_class, lvl),
+        "would_allow": egress.effective_mode(body.dest_class, lvl) == "allow",
+        "modes_by_class": {c: egress.effective_mode(c, lvl) for c in egress.CLASSES},
+    }
 
 
 # ---------------- T3 Token 成本监控 ----------------
@@ -494,11 +735,53 @@ def skills_list(p: auth.Principal = Depends(need("chat"))):
                 "title": s["name"],
                 "description": s.get("description", ""),
                 "trigger": s.get("trigger", ""),
+                "toolset": s.get("toolset", ""),
+                "risk": s.get("risk", "low"),
+                "allowed_tools": s.get("allowed_tools", []),
+                "version": s.get("version", "1.0.0"),
+                "category": s.get("category", s.get("toolset", "general")),
                 "sub": (s.get("description", "") or "")[:60],
             })
     except Exception:
         pass
+    # 统一收口：无论 T6 闭环学习技能还是 folder 技能，都补齐 LibreChat 字段契约
+    # （risk / allowed_tools / version / category 安全默认），使整张列表 100% 符合契约。
+    items = [skills_catalog.normalize_contract(it) for it in items]
     return {"skills": items}
+
+
+# ---------------- T6 技能安装（本地/URL → skills/ 目录）----------------
+#  业务逻辑在 core/skills_install.py（core 为单一可信源，见 CONTRIBUTING §4）；
+#  这里只做 HTTP 传输：入参 → 调用 core → 失败转 400。安全边界见该模块 docstring。
+from core import skills_install as skill_install_core
+
+
+class SkillInstallIn(BaseModel):
+    method: str = "paste"          # paste | path | url
+    value: str = ""                # 内容 / 本地路径 / https URL（git 或 zip）
+    name: str = ""                 # 可选覆盖名
+
+
+@app.post("/api/skills/install")
+def skills_install(body: SkillInstallIn, p: auth.Principal = Depends(need("agent.run"))):
+    try:
+        return skill_install_core.install_skill(body.method, body.value, body.name)
+    except skill_install_core.SkillInstallError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/skills/scan")
+def skills_scan(p: auth.Principal = Depends(need("chat"))):
+    from core import skills_catalog
+    return skills_catalog.scan_skills()
+
+
+@app.delete("/api/skills/{name}")
+def skills_uninstall(name: str, p: auth.Principal = Depends(need("agent.run"))):
+    try:
+        return skill_install_core.uninstall_skill(name)
+    except skill_install_core.SkillInstallError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/experts/list")
@@ -761,16 +1044,80 @@ class SubAgentIn(BaseModel):
     task: str
     max_rounds: int = 3
     criteria: dict = {"min_len": 5, "must_contain": ["方案"]}
+    agent_id: str = ""          # 指定子 Agent（内置或自定义）；为空则按 system_prompt/read_only 临时生成
+    system_prompt: str = ""     # 未指定 agent_id 时的通用系统提示
+    read_only: bool = False     # 未指定 agent_id 时是否走只读检索增强
+
+
+class SubAgentDefIn(BaseModel):
+    name: str
+    role: str = ""
+    system_prompt: str = ""
+    tools: str = "[]"
+    read_only: bool = False
+
+
+@app.get("/api/subagent")
+def subagent_list(p: auth.Principal = Depends(need("agent.run"))):
+    """列出本租户可用子 Agent：内置（含 read-only Explorer）+ 用户自定义。"""
+    return {"agents": subagent.list_agents(p.tenant_id)}
+
+
+@app.post("/api/subagent")
+def subagent_create(body: SubAgentDefIn, p: auth.Principal = Depends(need("agent.run"))):
+    aid = subagent.create_agent(
+        p.tenant_id, body.name, body.role, body.system_prompt, body.tools, 1 if body.read_only else 0
+    )
+    db.audit(p.tenant_id, p.username, "subagent.create", aid, body.name)
+    return {"ok": True, "id": aid}
+
+
+@app.put("/api/subagent/{aid}")
+def subagent_update(aid: str, body: SubAgentDefIn, p: auth.Principal = Depends(need("agent.run"))):
+    subagent.update_agent(
+        p.tenant_id, aid,
+        name=body.name, role=body.role, system_prompt=body.system_prompt,
+        tools=body.tools, read_only=1 if body.read_only else 0,
+    )
+    return {"ok": True}
+
+
+@app.delete("/api/subagent/{aid}")
+def subagent_delete(aid: str, p: auth.Principal = Depends(need("agent.run"))):
+    subagent.delete_agent(p.tenant_id, aid)
+    db.audit(p.tenant_id, p.username, "subagent.delete", aid, "")
+    return {"ok": True}
 
 
 @app.post("/api/subagent/run")
 def subagent_run(body: SubAgentIn, p: auth.Principal = Depends(need("agent.run"))):
+    # 解析目标子 Agent
+    agent = None
+    if body.agent_id:
+        for a in subagent.list_agents(p.tenant_id):
+            if a["id"] == body.agent_id:
+                agent = a
+                break
+    if agent is None:
+        agent = {
+            "id": "ad-hoc",
+            "name": "临时子 Agent",
+            "role": "",
+            "system_prompt": body.system_prompt or "你是 MiniYuxi 的子 Agent，请专业、简洁地完成任务。",
+            "tools": "[]",
+            "read_only": 1 if body.read_only else 0,
+        }
     res = subagent.delegate(
         body.task,
-        generator_fn=lambda t, c: "草稿：针对「%s」的初步方案，包含风险与建议。" % t,
+        generator_fn=lambda t, c: subagent.real_generator(agent, t, p.tenant_id),
         judge_fn=lambda d, c: subagent.rule_judge(d, body.criteria),
         max_rounds=body.max_rounds,
     )
+    res["agent"] = {
+        "id": agent["id"],
+        "name": agent["name"],
+        "read_only": bool(agent.get("read_only")),
+    }
     return res
 
 
@@ -1619,6 +1966,99 @@ def hrm_flow_submit(form_key: str, rid: str, p: auth.Principal = Depends(need("h
 # 本地/内网自用工具：前端资源一律 no-cache，避免「改了代码但浏览器仍跑旧 JS」这类
 # 排查成本极高的假故障（曾导致前端修复不生效、被误判为后端故障）。
 _NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
+
+
+# =====================================================================
+#  办公操作面（Office Surface）：Univer 表格 / 文档 · 纯本地存档
+# ---------------------------------------------------------------------
+#  合规红线：快照只落本地 SQLite，不上传任何外部服务；前端资产同样由本机提供。
+#  资产未构建（web/vendor/univer/univer.bundle.js 缺失）时返回 503 并给出构建指引，
+#  不静默 500，也不回退到任何 CDN。
+# =====================================================================
+class OfficeSaveIn(BaseModel):
+    data: dict = {}
+    kind: str = "sheet"      # sheet | doc
+    name: str = "未命名"
+    doc_id: str = ""         # 空 = 新建
+
+
+@app.get("/api/office/list")
+def office_list(kind: str = "", p: auth.Principal = Depends(need("kb.read"))):
+    """列出本租户办公文档（仅元数据，不返回大快照）。"""
+    return {"docs": office.list_docs(p.tenant_id, kind)}
+
+
+@app.post("/api/office/save")
+def office_save(body: OfficeSaveIn, p: auth.Principal = Depends(need("kb.write"))):
+    """保存 / 新建办公文档快照。"""
+    doc_id = office.save_doc(p.tenant_id, body.data, body.kind, body.name, body.doc_id)
+    db.audit(p.tenant_id, p.username, "office.save", doc_id, body.name)
+    return {"ok": True, "doc_id": doc_id}
+
+
+@app.get("/api/office/{doc_id}")
+def office_get(doc_id: str, p: auth.Principal = Depends(need("kb.read"))):
+    """取单个办公文档（含快照）。"""
+    d = office.get_doc(p.tenant_id, doc_id)
+    if not d:
+        raise HTTPException(404, "办公文档不存在")
+    return d
+
+
+@app.delete("/api/office/{doc_id}")
+def office_delete(doc_id: str, p: auth.Principal = Depends(need("kb.write"))):
+    if not office.delete_doc(p.tenant_id, doc_id):
+        raise HTTPException(404, "办公文档不存在")
+    db.audit(p.tenant_id, p.username, "office.delete", doc_id, "")
+    return {"ok": True}
+
+
+def _office_asset(relpath: str, media_type: str):
+    """返回 web/ 下的办公资产；缺失时 503 + 构建指引（绝不回退 CDN）。"""
+    fp = WEB_DIR / relpath
+    if not fp.is_file():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": "办公套件资产未构建：%s" % relpath,
+                "howto": "cd tools/office-bundle && npm install && npm run build",
+            },
+        )
+    return FileResponse(fp, media_type=media_type, headers=_NO_CACHE)
+
+
+@app.get("/office/office-host.js")
+def office_host_js():
+    return _office_asset("office/office-host.js", "application/javascript")
+
+
+@app.get("/office/office-host.css")
+def office_host_css():
+    return _office_asset("office/office-host.css", "text/css")
+
+
+@app.get("/vendor/univer/univer.bundle.js")
+def univer_bundle_js():
+    return _office_asset("vendor/univer/univer.bundle.js", "application/javascript")
+
+
+@app.get("/vendor/univer/univer.bundle.css")
+def univer_bundle_css():
+    return _office_asset("vendor/univer/univer.bundle.css", "text/css")
+
+
+@app.get("/vendor/univer/univer.worker.js")
+def univer_worker_js():
+    """公式引擎 Worker。主线程以 workerURL 引用它——**没有它 preset 会关掉公式执行**，
+    HR 表格里 SUM/AVG 就不出结果。必须是 classic worker（主线程 new Worker(url) 无 type）。"""
+    return _office_asset("vendor/univer/univer.worker.js", "application/javascript")
+
+
+@app.get("/favicon.ico")
+def favicon():
+    """favicon.ico 静音端点：浏览器默认会请求，没有就 404 噪音。
+    桌面端外壳内置应用图标，204 比塞个空 PNG 更稳；后续要换品牌图标可改成 FileResponse。"""
+    return Response(status_code=204)
 
 
 # 首页渲染缓存：文件 mtime 不变则复用上次渲染结果（图标 JSON 本身已缓存），

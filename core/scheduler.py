@@ -115,3 +115,4 @@ def mark_run(job_id, status="ok", now=None, conn=None):
     else:
         c.execute("UPDATE schedules SET last_run=? WHERE id=?", (ts, job_id))
     c.commit()
+

@@ -81,6 +81,11 @@ def _web_search(query, tenant_id=None, **_):
     """零依赖真实联网搜索：标准库 urllib 直连，无需额外 Key。
     优先级：① 企业搜索后端(WEB_SEARCH_API_URL+KEY) → ② Bing(cn/www，国内可达) → ③ DuckDuckGo(兜底) → 友好降级。
     DuckDuckGo 在部分网络环境（如中国大陆）不可达，故默认走 Bing。"""
+    # 出境闸门：搜索词由用户问题派生，属「数据出境」的一类。
+    # 被拒 → 返回友好降级文案，不崩链路。
+    from . import egress
+    if egress.blocked("search", "web_search", query, tenant_id=tenant_id):
+        return {"result": "（联网检索已被数据出境策略拒绝。请联系管理员调整「数据出境」策略。）"}
     import html as _html
     import re as _re
     import urllib.parse as _up
@@ -202,20 +207,27 @@ def search_backend_status():
     configured = bool(ent_url and ent_key)
     reachable = None
     if configured and backend in ("doubao",):
-        try:
-            import urllib.request as _ur
-            url = ent_url.rstrip("/") + ("/search_api/web_search" if "/search_api" not in ent_url else "")
-            req = _ur.Request(
-                url,
-                data=json.dumps({"Query": "ping", "SearchType": "web", "Count": 1, "NeedSummary": True}).encode("utf-8"),
-                headers={"Content-Type": "application/json",
-                          "Authorization": f"Bearer {ent_key}",
-                          "X-Traffic-Tag": "web_search_mcp"},
-            )
-            with _ur.urlopen(req, timeout=4) as r:
-                reachable = (r.status == 200)
-        except Exception:
+        from . import egress
+        # 探针载荷是固定常量 "ping"（无用户数据），但**仍受策略约束**：
+        # 企业要求「零外发」时这里必须直接判定不可达，不能偷偷打外网。
+        # audit=False：30s 一次的高频探针不写审计行，避免把出境日志灌成噪音。
+        if egress.blocked("search", ent_url, "ping", audit=False):
             reachable = False
+        else:
+            try:
+                import urllib.request as _ur
+                url = ent_url.rstrip("/") + ("/search_api/web_search" if "/search_api" not in ent_url else "")
+                req = _ur.Request(
+                    url,
+                    data=json.dumps({"Query": "ping", "SearchType": "web", "Count": 1, "NeedSummary": True}).encode("utf-8"),
+                    headers={"Content-Type": "application/json",
+                              "Authorization": f"Bearer {ent_key}",
+                              "X-Traffic-Tag": "web_search_mcp"},
+                )
+                with _ur.urlopen(req, timeout=4) as r:
+                    reachable = (r.status == 200)
+            except Exception:
+                reachable = False
     labels = {"doubao": "豆包/火山引擎", "bing": "Bing", "duckduckgo": "DuckDuckGo"}
     chain = (["doubao", "bing", "duckduckgo"] if backend == "doubao"
              else [backend, "duckduckgo"] if backend == "bing" else [backend])
@@ -232,9 +244,15 @@ def search_backend_status():
 
 
 # ---------------- 注册表操作 ----------------
-def register(name, description, schema, toolset, handler):
-    """供外部（MCP）动态注册工具。"""
-    _REGISTRY[name] = {"name": name, "description": description, "schema": schema, "toolset": toolset, "handler": handler}
+def register(name, description, schema, toolset, handler, risk="info", requires_approval=False):
+    """供外部（MCP）动态注册工具。
+
+    risk: info / warn / critical —— 工具风险等级（驱动前端/审计展示）。
+    requires_approval: 是否强制 HITL 审批（run_tool_governed 自动挂审批卡）。
+    """
+    _REGISTRY[name] = {"name": name, "description": description, "schema": schema,
+                       "toolset": toolset, "handler": handler,
+                       "risk": risk, "requires_approval": bool(requires_approval)}
 
 
 def unregister(name):
@@ -290,12 +308,14 @@ def _audit_tool_event(tool_name: str, result: str, severity: str = "info",
         pass
 
 
-def run_tool_governed(name, args=None, tenant_id=None, session_id=None):
+def run_tool_governed(name, args=None, tenant_id=None, session_id=None, approved_aid=None):
     """治理版工具调用（对应 Hermes 三·工具治理管线 + 十一·审批门）。
 
-    顺序：未知工具 → 安全兜底(hardline) → 审批门(requires_approval / 命门工具) → 执行。
-    每个出口都写审计留痕（result: rejected / blocked / pending / success / error）。
+    顺序：未知工具 → 安全兜底(hardline) → 续跑分支(已批准审批单) → 审批门(requires_approval / 命门工具) → 执行。
+    每个出口都写审计留痕（result: rejected / blocked / pending / resumed / success / error）。
     命中审批门时不执行，返回 {status:'pending', approval_id} 由上层挂起等待 HITL 决策。
+    approved_aid：HITL 闭环续跑凭证——前端在 /api/approvals/{aid}/decide 通过后，
+    再次调用并带上已 approved 的 aid，此处跳过审批门直接执行（不重复建单、不绕过 hardline）。
     """
     spec = _REGISTRY.get(name)
     if not spec:
@@ -312,6 +332,25 @@ def run_tool_governed(name, args=None, tenant_id=None, session_id=None):
                 return {"error": "执行被安全层拦截：命中不可恢复命令黑名单（hardline block）"}
     except Exception:
         pass
+    # 续跑分支：带上已 approved 的审批单时，跳过审批门直接执行（HITL 闭环）。
+    # 仍保留上方 hardline 安全兜底——续跑也不绕过不可恢复命令拦截。
+    if approved_aid:
+        try:
+            from . import approval
+            ap = approval.get(approved_aid)
+            if ap and ap.get("status") == "approved":
+                _audit_tool_event(name, "resumed", "info", tenant_id, session_id,
+                                  {"approval_id": approved_aid})
+                # B2 防御纵深：高危/需确认工具仅在 HITL 续跑时注入 __commit=True，
+                # Adapter 才真正提交业务单据（首次未经审批的调用被上方审批门拦截，
+                # 即便绕过也只会落到 Adapter 的“预览态”，不会直提交）。
+                if spec.get("requires_approval") or spec.get("risk") == "high_risk":
+                    args = dict(args or {})
+                    args["__commit"] = True
+                return call_tool(name, args, tenant_id=tenant_id)
+            # 未批准 / 已拒绝 / 不存在 → 落到下方审批门重新评估，避免绕过审批门
+        except Exception:
+            pass
     # 审批门：工具自身标记 或 落入命门/风险集合
     try:
         from . import approval
@@ -345,14 +384,23 @@ _MCP_DISCOVER_TTL = 60.0
 _mcp_discover_cache = {"ts": 0.0, "val": []}
 
 
+def invalidate_mcp_cache():
+    """前端添加/变更 mcp 连接器后，强制下一轮 /api/tools/list 重新做 SSE 发现。"""
+    _mcp_discover_cache["ts"] = 0.0
+
+
 def list_tools() -> list:
-    base = [{"name": v["name"], "description": v["description"], "schema": v["schema"], "toolset": v["toolset"]}
+    base = [{"name": v["name"], "description": v["description"], "schema": v["schema"],
+             "toolset": v["toolset"], "risk": v.get("risk", "info"),
+             "requires_approval": bool(v.get("requires_approval", False))}
             for v in _REGISTRY.values()]
     try:
         from . import mcp_client
         now = time.time()
         if now - _mcp_discover_cache["ts"] > _MCP_DISCOVER_TTL:
-            _mcp_discover_cache["val"] = mcp_client.discover_tools()
+            local = mcp_client.discover_tools()
+            remote = mcp_client.discover_connector_tools()
+            _mcp_discover_cache["val"] = local + remote
             _mcp_discover_cache["ts"] = now
         base += _mcp_discover_cache["val"]
     except Exception:
@@ -368,12 +416,209 @@ def init():
                 name TEXT PRIMARY KEY, toolset TEXT, description TEXT, schema TEXT, enabled INTEGER DEFAULT 1,
                 created_at TEXT DEFAULT (datetime('now')))"""
         )
+        # ---- T2+「本地工具市场」（抄 treg 理念 · 本地化）：补元数据列 + 索引 ----
+        for col, decl in [
+                    ("category", "TEXT DEFAULT 'utility'"),       # utility / knowledge / web / mcp / skill / user ...
+                    ("tags", "TEXT DEFAULT '[]'"),                # JSON 数组
+                    ("risk", "TEXT DEFAULT 'info'"),               # info / warn / critical
+                    ("source", "TEXT DEFAULT 'builtin'"),         # builtin / mcp / user / skill
+                    ("requires_approval", "INTEGER DEFAULT 0"),
+                    # ⚠️ 必须用「常量」默认值：ALTER TABLE ADD COLUMN 不允许非常量默认
+                    # （写 DEFAULT (datetime('now')) 会报 "Cannot add a column with non-constant default"，
+                    #  导致该列永远加不上 → 所有 SET updated_at=... 的 UPDATE 全部静默失败）。
+                    ("updated_at", "TEXT DEFAULT ''"),
+                ]:
+            try:
+                conn.execute("ALTER TABLE tools_registry ADD COLUMN %s %s" % (col, decl))
+            except Exception:
+                pass  # 列已存在，ALTER 会报错，吞掉即可（幂等）
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tools_registry_cat ON tools_registry(category, enabled)")
         conn.commit()
         for v in _REGISTRY.values():
             conn.execute(
                 "INSERT OR IGNORE INTO tools_registry(name,toolset,description,schema) VALUES(?,?,?,?)",
                 (v["name"], v["toolset"], v["description"], json.dumps(v["schema"], ensure_ascii=False)),
             )
+        # 回填元数据：只刷「尚未回填」的行（以 tags 为空判定），
+        # 避免每次启动都覆盖运营手动维护过的分类/风险等级。
+        for name, cat, tags, risk, src, ra in _BUILTIN_META:
+            try:
+                conn.execute(
+                    "UPDATE tools_registry SET category=?, tags=?, risk=?, source=?, requires_approval=?, "
+                    "updated_at=datetime('now') "
+                    "WHERE name=? AND (tags IS NULL OR tags='' OR tags='[]')",
+                    (cat, json.dumps(tags, ensure_ascii=False), risk, src, 1 if ra else 0, name),
+                )
+            except Exception:
+                pass
         conn.commit()
     except Exception:
         pass
+
+
+# 内置工具的市场元数据（与 @tool() 注册同步；此表只供 init 回填用，不参与运行）
+_BUILTIN_META = [
+    # name,              category,    tags,                risk,     source,   requires_approval
+    ("current_time",      "utility",   ["time", "builtin"], "info",   "builtin", False),
+    ("calc",              "utility",   ["math", "builtin"], "info",   "builtin", False),
+    ("kb_search",         "knowledge", ["rag", "internal"], "info",   "builtin", False),
+    ("count_docs",        "knowledge", ["rag", "stats"],    "info",   "builtin", False),
+    ("web_search",        "web",        ["network", "search"], "warn", "builtin", True),
+]
+
+
+# ---------------- 本地工具市场（抄 treg 理念 · 本地化 · 不接任何远端凭据）----------------
+def list_market(category: str = "", tag: str = "", q: str = "", enabled_only: bool = False) -> list:
+    """市场视角的工具列表：分类/标签/关键词筛选。
+
+    合规：纯本地查询 SQLite + 内存注册表；不触发任何外部网络探测。
+    远端 MCP 工具的发现走 mcp_client.discover_tools()（本地进程），仍保留「source=mcp」。
+    """
+    where, params = [], []
+    if category:
+        where.append("category=?"); params.append(category)
+    if enabled_only:
+        where.append("enabled=1")
+    where.append("(risk != '' OR category != '')")  # 已回填元数据的
+    sql = (
+        "SELECT name,toolset,description,schema,enabled,category,tags,risk,source,requires_approval "
+        "FROM tools_registry"
+    )
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY category ASC, name ASC"
+    try:
+        rows = db.connect().execute(sql, params).fetchall()
+    except Exception:
+        rows = []
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["tags"] = json.loads(d.get("tags") or "[]")
+        except Exception:
+            d["tags"] = []
+        try:
+            d["schema"] = json.loads(d.get("schema") or "{}")
+        except Exception:
+            d["schema"] = {}
+        d["requires_approval"] = bool(d.get("requires_approval"))
+        d["enabled"] = bool(d.get("enabled"))
+        if tag and tag not in d["tags"]:
+            continue
+        if q and (q not in (d["name"] or "") and q not in (d["description"] or "")):
+            continue
+        out.append(d)
+    return out
+
+
+def get_market(name: str):
+    """取单个工具的完整市场详情。"""
+    try:
+        row = db.connect().execute(
+            "SELECT name,toolset,description,schema,enabled,category,tags,risk,source,requires_approval "
+            "FROM tools_registry WHERE name=?", (name,)
+        ).fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    d = dict(row)
+    try:
+        d["tags"] = json.loads(d.get("tags") or "[]")
+    except Exception:
+        d["tags"] = []
+    try:
+        d["schema"] = json.loads(d.get("schema") or "{}")
+    except Exception:
+        d["schema"] = {}
+    d["requires_approval"] = bool(d.get("requires_approval"))
+    d["enabled"] = bool(d.get("enabled"))
+    return d
+
+
+def toggle_market(name: str, enabled: bool) -> bool:
+    """切换工具启停（disabled 时 run_tool_governed 仍会拒绝调用）。返回是否命中。"""
+    try:
+        cur = db.connect().execute(
+            "UPDATE tools_registry SET enabled=?, updated_at=datetime('now') WHERE name=?",
+            (1 if enabled else 0, name),
+        )
+        db.connect().commit()
+        return cur.rowcount > 0
+    except Exception:
+        return False
+
+
+def list_categories() -> list:
+    """返回已用到的 category 列表（按工具数量降序），便于前端抽屉做标签条。"""
+    try:
+        rows = db.connect().execute(
+            "SELECT category, COUNT(*) AS n FROM tools_registry "
+            "WHERE category != '' GROUP BY category ORDER BY n DESC"
+        ).fetchall()
+        return [{"category": r["category"], "count": r["n"]} for r in rows]
+    except Exception:
+        return []
+
+
+# ---------------- 视频生成（V1）：经"视频 MCP 连接器"转发 ----------------
+#  设计：MiniYuxi 自身不带视频模型。视频能力通过连接器挂一个 capability=video 的 MCP
+#  服务实现（连接器框架已支持任意 MCP 工具的发现与调用）。本工具负责：解析该连接器 →
+#  发现其视频生成工具 → 转发 prompt。未配置时返回明确接入指引（不崩、不误导）。
+@tool(
+    "video.generate",
+    "生成视频：通过已配置的视频 MCP 连接器转发到视频生成服务；若未配置则提示如何接入。",
+    {"type": "object",
+     "properties": {"prompt": {"type": "string", "description": "视频内容描述 / 分镜脚本"}},
+     "required": ["prompt"]},
+    "video", requires_approval=False,
+)
+def _video_generate(tenant_id=None, **args):
+    prompt = args.get("prompt") or ""
+    if not prompt:
+        return {"error": "缺少 prompt 参数（视频内容描述/脚本）"}
+    try:
+        from . import connectors
+        from . import mcp_client
+        target = None
+        for d in connectors.list_connectors():
+            if d.get("kind") != "mcp" or not d.get("enabled"):
+                continue
+            cfg = json.loads(d.get("config_json") or "{}")
+            if cfg.get("capability") == "video" or cfg.get("video"):
+                target = (d["id"], cfg)
+                break
+        if not target:
+            return {"error": "未配置视频服务商：请在「连接器」中添加一个 kind=mcp、transport=sse、"
+                            "config.capability='video' 的 MCP 连接器（指向你的视频生成服务），再调用本工具。"}
+        cid, cfg = target
+        endpoint = cfg.get("endpoint")
+        if not endpoint:
+            return {"error": "视频连接器缺少 endpoint"}
+        token = mcp_client._resolve_token(cfg)
+        cli = mcp_client.MCPClientSSE(endpoint, token=token, timeout=30.0)
+        cli.initialize()
+        tools = cli.list_tools()
+        cli.close()
+        vtool = cfg.get("video_tool")
+        if not vtool:
+            for t in tools:
+                nm = (t.get("name") or "").lower()
+                if "video" in nm or "生成视频" in nm or "text_to_video" in nm or "t2v" in nm:
+                    vtool = t.get("name")
+                    break
+        if not vtool:
+            names = ", ".join((t.get("name") or "") for t in tools) or "（无）"
+            return {"error": "该视频 MCP 未暴露视频生成工具（名称应含 video/t2v）。已发现：" + names}
+        cli2 = mcp_client.MCPClientSSE(endpoint, token=token, timeout=90.0)
+        cli2.initialize()
+        payload = {"prompt": prompt}
+        for k, v in args.items():
+            if k != "prompt":
+                payload[k] = v
+        res = cli2.call_tool(vtool, payload)
+        cli2.close()
+        return res or {}
+    except Exception as e:
+        return {"error": "视频生成调用失败：" + str(e)[:200]}
