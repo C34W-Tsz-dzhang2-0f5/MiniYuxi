@@ -41,6 +41,10 @@ jobs:
       - name: Skill tools test (install/uninstall from chat)
         run: python tests/_verify_skill_tools.py
 
+      # HTTP 级：真的把「npx skills add … --skill …」发给 /api/chat，验技能落盘（自起服务、自选空闲端口）
+      - name: Chat-driven skill install e2e (HTTP level)
+        run: python tests/_e2e_chat_skill_install.py
+
       # 桌面端 sidecar 只跑单元：端到端 tour 依赖 PyInstaller 产物（Windows 专属），放 Linux CI 会假红
       - name: Desktop sidecar unit test (token ttl)
         run: python tests/test_desktop_sidecar.py --unit-only
