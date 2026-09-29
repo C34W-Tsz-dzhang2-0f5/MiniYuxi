@@ -20,6 +20,7 @@ import argparse
 import os
 import platform
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -28,6 +29,9 @@ REPO = Path(__file__).resolve().parent.parent
 ENTRY = REPO / "run.py"
 WEB = REPO / "web"
 SKILLS = REPO / "skills"
+# ⚠️ core/hrm.py 用 os.path.dirname(__file__) 拼路径读它，冻结后必须落在 _MEIPASS/core/ 下。
+# 漏了它桌面端 /api/hrm/* 全线 500（源码环境正常，打包专属缺陷）。
+HRM_SCHEMA = REPO / "core" / "hrm_schema.json"
 DESKTOP_BIN_DIR = REPO / "apps" / "desktop" / "src-tauri" / "binaries"
 SIDECAR_NAME = "miniyuxi-sidecar"
 
@@ -45,7 +49,12 @@ EXTRA_HIDDENIMPORTS = [
     "core.interview", "core.connectors", "core.subagent", "core.eval_harness",
     "core.gateway", "core.auth", "core.config", "core.orchestration",
     "core.usage", "core.evolution", "core.canvas",
-    "core.rag_adapter", "core.memory_v2",
+    "core.rag_adapter", "core.memory_v2", "core.office",
+    # 版本号唯一来源（api.py / run.py / cli.py / core.mcp_client 都 import 它）
+    "core.version",
+    # 数据出境管控（5 类目的地的 10 个出口都会 `from . import egress`，全是函数内延迟导入，
+    # PyInstaller 静态分析可能漏 → 必须显式声明，否则冻结内核里出境闸门直接 ImportError）
+    "core.egress",
     "sqlite_vec",  # 向量扩展（注意：它的 vec0.dll 是数据文件，靠 --collect-all 收集）
 ]
 
@@ -55,15 +64,24 @@ EXTRA_HIDDENIMPORTS = [
 
 
 def host_target_triple() -> str:
-    """当前主机的 Rust target triple（作为产物**后缀**，供 Tauri 按平台打包识别）。"""
+    """当前主机的 Rust target triple（作为产物**后缀**，供 Tauri 按平台打包识别）。
+
+    ⚠️ Windows 上**不要**用 platform.machine() 判位宽：它读的是 PROCESSOR_ARCHITECTURE
+    环境变量，被 32 位父进程（CI runner / 后台任务宿主）启动时会误报 x86，
+    产物名变成 i686-pc-windows-msvc.exe，Tauri 按 host triple 找 x86_64-... 就会找不到 sidecar。
+    产物架构 = 解释器架构，用 struct.calcsize("P") 判位宽才是确定的。
+    """
     s = platform.system().lower()
-    m = platform.machine().lower()
+    m = (platform.machine() or "").lower()
+    bits = struct.calcsize("P") * 8
     if s == "windows":
-        return "x86_64-pc-windows-msvc" if m in ("amd64", "x86_64") else "i686-pc-windows-msvc"
+        return "x86_64-pc-windows-msvc" if bits == 64 else "i686-pc-windows-msvc"
     if s == "darwin":
-        return "aarch64-apple-darwin" if m == "arm64" else "x86_64-apple-darwin"
+        return "aarch64-apple-darwin" if m in ("arm64", "aarch64") else "x86_64-apple-darwin"
     if s == "linux":
-        return "x86_64-unknown-linux-gnu" if m in ("amd64", "x86_64") else "aarch64-unknown-linux-gnu"
+        if m in ("aarch64", "arm64"):
+            return "aarch64-unknown-linux-gnu"
+        return "x86_64-unknown-linux-gnu" if bits == 64 else "i686-unknown-linux-gnu"
     raise SystemExit(f"未知平台：{s}/{m}")
 
 
@@ -80,8 +98,8 @@ def ensure_pyinstaller(python: str, install: bool) -> None:
                    check=True)
 
 
-def build(python: str) -> Path:
-    ensure_pyinstaller(python, install=True)
+def build(python: str, install: bool = True) -> Path:
+    ensure_pyinstaller(python, install=install)
     triple = host_target_triple()
     DESKTOP_BIN_DIR.mkdir(parents=True, exist_ok=True)
     # 清掉旧产物（两种写法都清，防止早期写反的残留）
@@ -101,8 +119,12 @@ def build(python: str) -> Path:
     sep = ";" if platform.system() == "Windows" else ":"
     add_data = [
         f"{WEB}{sep}web",              # api.py 启动时要读 web/index.html 等静态文件
-        f"{SKILLS}{sep}skills",        # core/skills_catalog.py 从 skills/ 扫 SKILL.md
+        f"{SKILLS}{sep}skills",        # core/skills_catalog.py 扫 SKILL.md；core/taskflow.py 读 skills/task_library.json
+        f"{HRM_SCHEMA}{sep}core",      # core/hrm.py 读 core/hrm_schema.json（49 张表单结构）
     ]
+    missing = [d.split(sep)[0] for d in add_data if not Path(d.split(sep)[0]).exists()]
+    if missing:
+        raise SystemExit(f"✗ 待打包的数据文件缺失，先确认仓库完整：{missing}")
 
     args = [
         python, "-m", "PyInstaller",
@@ -112,8 +134,11 @@ def build(python: str) -> Path:
         "--distpath", str(DESKTOP_BIN_DIR / "_work"),
         "--workpath",  str(DESKTOP_BIN_DIR / "_work" / "build"),
         "--specpath",  str(DESKTOP_BIN_DIR / "_work"),
-        "--add-data", add_data[0],
     ]
+    # ⚠️ 曾只传 add_data[0]，导致 skills 声明了却没进包 → 桌面端 /api/taskflow/* 500。
+    # 必须循环传全部；新增数据文件只要加进 add_data 即可，别再手写下标。
+    for d in add_data:
+        args += ["--add-data", d]
     for m in EXTRA_HIDDENIMPORTS:
         args += ["--hidden-import", m]
 
@@ -164,7 +189,8 @@ def main() -> int:
     print(f"  MiniYuxi sidecar 打包（host = {host_target_triple()}）")
     print("=" * 70)
     try:
-        out = build(args.python)
+        # ⚠️ 曾把 install 写死成 True，--no-install 声明了却没生效
+        out = build(args.python, install=not args.no_install)
     except subprocess.CalledProcessError as exc:
         print(f"  ✗ PyInstaller 失败：exit={exc.returncode}", file=sys.stderr)
         return 1
