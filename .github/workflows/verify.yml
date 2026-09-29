@@ -38,6 +38,9 @@ jobs:
       - name: Skill install + video generation test (T6 closed loop)
         run: python tests/_verify_skill_install_and_video.py
 
+      - name: Skill tools test (install/uninstall from chat)
+        run: python tests/_verify_skill_tools.py
+
       # 桌面端 sidecar 只跑单元：端到端 tour 依赖 PyInstaller 产物（Windows 专属），放 Linux CI 会假红
       - name: Desktop sidecar unit test (token ttl)
         run: python tests/test_desktop_sidecar.py --unit-only

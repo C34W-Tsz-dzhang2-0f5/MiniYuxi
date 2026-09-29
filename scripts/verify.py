@@ -43,6 +43,8 @@ STEPS: list[tuple[str, list[str], tuple[str, ...], bool]] = [
      [PY, "tests/_verify_citation_gate.py"], (), True),
     ("技能安装 / 视频生成（T6 闭环）",
      [PY, "tests/_verify_skill_install_and_video.py"], ("requests",), False),
+    ("技能管理工具（对话内可安装/卸载）",
+     [PY, "tests/_verify_skill_tools.py"], ("requests",), True),
     ("桌面端 sidecar 单元（token ttl）",
      [PY, "tests/test_desktop_sidecar.py", "--unit-only"], (), True),
     ("路由冒烟（前端验收）",
