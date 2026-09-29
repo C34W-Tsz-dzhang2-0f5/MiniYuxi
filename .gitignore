@@ -18,6 +18,11 @@ jd_report.html
 !.env.example
 # 含明文 Key 的真实启动脚本：见 start_miniyuxi.example.bat
 start_miniyuxi.bat
+# MCP RuoYi Adapter 的 token vault 加密密钥（Fernet）——真实密钥，绝不入库
+# 生成于 tools/.ruoyi_fernet_key（见 tools/mcp_ruoyi_adapter.py:_load_key）。
+# 生产请改用环境变量 RUOYI_FERNET_KEY 注入持久密钥。
+tools/.ruoyi_fernet_key
+.ruoyi_fernet_key
 run.bat
 
 # ===== Python =====
@@ -62,6 +67,17 @@ BLOCKED.md
 代码审查_功能落地核对_20260910.md
 评估_真Agent达成度_20260911.md
 新建文本文档.txt
+
+# ===== Office 前端构建产物（2026-09-24 补）=====
+# web/vendor/univer/ 是 esbuild 构建产物（univer.bundle.js 12MB + worker + css），
+# 由 tools/office-bundle/ 生成，不入库。重新生成：
+#   cd tools/office-bundle && npm install --cache .npm-cache && npm run build
+# 缺失时 /office/* 会返回 503 并给出构建指引（不会静默失败，也不回退 CDN）。
+web/vendor/univer/
+# 构建工具的依赖与本地 npm 缓存（沙箱下全局 cache 写不进去，改用项目本地 .npm-cache）
+# ⚠️ 曾漏掉这两条：node_modules 207MB + .npm-cache 26MB 会一起进版本库
+node_modules/
+.npm-cache/
 
 # ===== OS =====
 .DS_Store
