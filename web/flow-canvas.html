@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MiniYuxi · 流程画布（Dify 风格编排）</title>
+<style>
+  :root {
+    --bg: #f6f8fb; --panel: #ffffff; --line: #e3e8ef; --ink: #1f2733; --muted: #6b7686;
+    --accent: #3370ff; --accent-soft: #eaf1ff; --shadow: 0 2px 10px rgba(20,30,50,.08);
+    --start: #16a34a; --llm: #3370ff; --tool: #f59e0b; --cond: #a855f7;
+    --human: #ec4899; --know: #0ea5e9; --end: #64748b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font-family: "PingFang SC","Microsoft YaHei",system-ui,sans-serif; color: var(--ink); background: var(--bg); }
+  #app { display: grid; grid-template-columns: 220px 1fr 280px; grid-template-rows: 52px 1fr; height: 100vh; }
+  header { grid-column: 1 / 4; display: flex; align-items: center; gap: 10px; padding: 0 14px;
+    background: var(--panel); border-bottom: 1px solid var(--line); box-shadow: var(--shadow); z-index: 5; }
+  header .title { font-weight: 700; font-size: 15px; }
+  header .spacer { flex: 1; }
+  header button, .tb-btn { border: 1px solid var(--line); background: #fff; color: var(--ink);
+    padding: 6px 12px; border-radius: 7px; cursor: pointer; font-size: 13px; }
+  header button:hover, .tb-btn:hover { border-color: var(--accent); color: var(--accent); }
+  header button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  aside.left { background: var(--panel); border-right: 1px solid var(--line); padding: 12px; overflow: auto; }
+  aside.left h4 { margin: 4px 0 10px; font-size: 12px; color: var(--muted); letter-spacing: .04em; }
+  .palette-item { display: flex; align-items: center; gap: 8px; padding: 9px 10px; margin-bottom: 8px;
+    border: 1px solid var(--line); border-radius: 9px; cursor: grab; background: #fff; user-select: none; }
+  .palette-item:hover { border-color: var(--accent); box-shadow: var(--shadow); }
+  .palette-item .dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .palette-item .lab { font-size: 13px; font-weight: 600; }
+  main { position: relative; overflow: hidden; background:
+    radial-gradient(circle, #dfe6ef 1px, transparent 1px) 0 0 / 22px 22px, var(--bg); }
+  #viewport { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  #edges { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+  .node { position: absolute; width: 184px; min-height: 60px; background: #fff; border: 1.5px solid var(--line);
+    border-radius: 11px; box-shadow: var(--shadow); padding: 9px 11px; cursor: move; user-select: none; }
+  .node.selected { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .node .nh { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; }
+  .node .nh .dot { width: 9px; height: 9px; border-radius: 3px; }
+  .node .nt { font-size: 13px; margin-top: 5px; line-height: 1.35; color: var(--ink); word-break: break-all; }
+  .node .badge { font-size: 10px; color: var(--muted); margin-top: 4px; }
+  .port { position: absolute; width: 13px; height: 13px; border-radius: 50%; background: #fff;
+    border: 2px solid var(--accent); top: 50%; transform: translateY(-50%); cursor: crosshair; }
+  .port.in { left: -7px; } .port.out { right: -7px; }
+  .port:hover { background: var(--accent); }
+  aside.right { background: var(--panel); border-left: 1px solid var(--line); padding: 14px; overflow: auto; }
+  aside.right h4 { margin: 0 0 10px; font-size: 12px; color: var(--muted); }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+  .field input, .field textarea, .field select { width: 100%; border: 1px solid var(--line); border-radius: 7px;
+    padding: 7px 9px; font-size: 13px; font-family: inherit; color: var(--ink); background: #fff; }
+  .field textarea { resize: vertical; min-height: 70px; }
+  .empty-hint { color: var(--muted); font-size: 13px; line-height: 1.6; }
+  #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: #1f2733; color: #fff;
+    padding: 9px 16px; border-radius: 9px; font-size: 13px; opacity: 0; transition: opacity .25s; z-index: 99; pointer-events: none; }
+  #toast.show { opacity: .96; }
+  .hint-bar { position: absolute; left: 12px; bottom: 12px; font-size: 12px; color: var(--muted);
+    background: rgba(255,255,255,.85); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+  select.flist { width: 100%; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <span class="title">🧩 流程画布</span>
+    <button id="btnNew">新建</button>
+    <button id="btnSave" class="primary">保存</button>
+    <button id="btnLoad">载入</button>
+    <button id="btnExport">导出 JSON</button>
+    <button id="btnImport">导入 JSON</button>
+    <button id="btnImportFlow">导入现有流程</button>
+    <button id="btnFit">适配视图</button>
+    <span class="spacer"></span>
+    <span id="status" style="font-size:12px;color:var(--muted)"></span>
+  </header>
+
+  <aside class="left">
+    <h4>节点面板（点击添加）</h4>
+    <div id="palette"></div>
+  </aside>
+
+  <main id="stage">
+    <div id="viewport">
+      <svg id="edges"><g id="edgeLayer"></g></svg>
+      <div id="nodeLayer"></div>
+    </div>
+    <div class="hint-bar">拖动空白处平移 · 滚轮缩放 · 从节点右侧圆点拖到另一节点左侧圆点连线 · 双击节点删除</div>
+  </main>
+
+  <aside class="right">
+    <h4>属性</h4>
+    <div id="props"><div class="empty-hint">未选中节点。<br/>从左侧面板添加节点，或在画布中点击选中。</div></div>
+  </aside>
+</div>
+<div id="toast"></div>
+<script src="flow-canvas.js"></script>
+</body>
+</html>
