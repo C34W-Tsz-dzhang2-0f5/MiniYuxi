@@ -23,8 +23,18 @@ use tauri_plugin_shell::process::{CommandChild, CommandEvent, TerminatedPayload}
 use tauri_plugin_shell::ShellExt;
 use url::Url;
 
-/// tauri.conf.json 中 bundle.externalBin 的条目名（打包后的 Python 内核可执行文件名）
-const SIDECAR_NAME: &str = "binaries/miniyuxi-sidecar";
+/// 打包态 sidecar 可执行文件的候选名（按序尝试，第一个能起来的为准）。
+///
+/// - `miniyuxi-sidecar`          ：Tauri `externalBin` 的**实际落盘位置**——打包器只保留
+///   文件名，把它放到主 exe 同目录；`tauri-plugin-shell` 的 `relative_command_path()`
+///   也是拿 exe 所在目录去 join，所以运行时该用裸文件名。
+/// - `binaries/miniyuxi-sidecar` ：历史手工布局（老装机版把 sidecar 放在 binaries/ 子目录）。
+///
+/// 背景：`tauri.conf.json` 的 externalBin 写的是 `binaries/miniyuxi-sidecar`，但那是
+/// **构建期**的源路径；旧代码直接拿它当**运行期**相对路径拼接，导致干净装机后
+/// `INSTALLDIR/binaries/miniyuxi-sidecar.exe` 不存在、sidecar 起不来（只有手工补过
+/// binaries/ 的机器能跑）。这里改为裸名优先、旧路径兜底。
+const SIDECAR_NAMES: &[&str] = &["miniyuxi-sidecar", "binaries/miniyuxi-sidecar"];
 /// run.py --sidecar 打印的就绪契约行前缀（另一条兜底通道是 data/sidecar.json）
 const READY_PREFIX: &str = "MINIYUXI_SIDECAR_READY ";
 const SPLASH_LABEL: &str = "splash";
@@ -74,13 +84,24 @@ fn spawn_sidecar(app: &tauri::AppHandle, state: &SidecarState) -> Result<(), Str
             a.extend(args.iter().cloned());
             app.shell().command(py).args(a).spawn().map_err(|e| e.to_string())?
         }
-        Err(_) => app
-            .shell()
-            .sidecar(SIDECAR_NAME)
-            .map_err(|e| format!("找不到 sidecar 可执行文件 {SIDECAR_NAME}：{e}"))?
-            .args(args)
-            .spawn()
-            .map_err(|e| format!("sidecar 启动失败：{e}"))?,
+        Err(_) => {
+            // 逐个候选名尝试 spawn：找不到文件 / 启动失败都记下错误，全失败才报错。
+            let mut last_err = String::new();
+            let mut spawned = None;
+            for name in SIDECAR_NAMES {
+                match app.shell().sidecar(*name) {
+                    Ok(cmd) => match cmd.args(args.clone()).spawn() {
+                        Ok(child) => {
+                            spawned = Some(child);
+                            break;
+                        }
+                        Err(e) => last_err = format!("sidecar 启动失败（{name}）：{e}"),
+                    },
+                    Err(e) => last_err = format!("找不到 sidecar 可执行文件 {name}：{e}"),
+                }
+            }
+            spawned.ok_or(last_err)?
+        }
     };
 
     *state.child.lock().unwrap() = Some(child);
