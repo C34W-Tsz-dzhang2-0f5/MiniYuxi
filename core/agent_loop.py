@@ -48,10 +48,11 @@ def run(system: str, user_prompt: str, history: list | None = None,
 
     tools = _to_openai_tools()
     messages = []
-    for h in (history or [])[-rag.MAX_HISTORY:]:
+    from . import memory_slim
+    for h in memory_slim.slim_messages(history):
         role = h.get("role") if isinstance(h, dict) else None
         content = (h.get("content") if isinstance(h, dict) else "") or ""
-        if role in ("user", "assistant") and content:
+        if (role in ("user", "assistant") or (content or "").startswith(memory_slim.SLIM_PREFIX)) and content:
             messages.append({"role": role, "content": content[:rag.MAX_HISTORY_CHARS]})
     # 用户提问（本轮主体）
     user_msg = user_prompt
