@@ -234,14 +234,28 @@ def install_skill(method, value, name="", skills_dir=None, select=""):
             if security.hardline_block(url) or security.is_dangerous_command(url):
                 raise SkillInstallError("链接命中安全黑名单，已拒绝")
             if url.lower().endswith(".git"):
-                try:
-                    subprocess.run(["git", "clone", "--depth", "1", url, stage],
+                def _clone(u):
+                    subprocess.run(["git", "clone", "--depth", "1", u, stage],
                                    timeout=180, capture_output=True, check=True)
+                try:
+                    _clone(url)
                 except FileNotFoundError:
                     raise SkillInstallError("本机未安装 git，无法克隆仓库")
                 except subprocess.CalledProcessError as e:
-                    raise SkillInstallError(
-                        "git clone 失败：" + (e.stderr or b"").decode(errors="ignore")[:200])
+                    err1 = (e.stderr or b"").decode(errors="ignore")[:200]
+                    # 国内网络兜底：GitHub 直连常超时，自动改走镜像再试一次
+                    #（镜像前缀可用环境变量 MINIYUXI_GIT_MIRROR 覆盖，留空则不重试）
+                    mirror = (os.getenv("MINIYUXI_GIT_MIRROR") or "https://ghfast.top/").strip()
+                    murl = (mirror.rstrip("/") + "/" + url) if mirror else None
+                    if not murl:
+                        raise SkillInstallError("git clone 失败：" + err1)
+                    try:
+                        _clone(murl)
+                    except subprocess.CalledProcessError as e2:
+                        err2 = (e2.stderr or b"").decode(errors="ignore")[:120]
+                        raise SkillInstallError(
+                            "git clone 失败（直连与镜像 %s 均试过）：%s | 镜像错误：%s"
+                            % (mirror, err1, err2))
             else:
                 # zip 下载 + 安全解压（逐条防穿越，过 security.validate_within_dir）
                 try:

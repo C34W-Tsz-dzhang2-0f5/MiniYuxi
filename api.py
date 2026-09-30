@@ -1773,6 +1773,23 @@ def models_chat(body: MChatIn, p: auth.Principal = Depends(need("chat"))):
         rid = model_hub.route(body.message, body.strategy)
         mid = rid["model_id"]
 
+    # ---- 工具快路径（2026-09-30）：指定模型/自动路由补上「真执行」能力 ----
+    # 此前该端点是纯对话（model_hub.chat 不带工具），用户粘贴
+    # `npx skills add <仓库> --skill <名>` 会被模型"解释"一遍而非执行
+    # （2026-09-30 阿长截图实测）。这里复用 rag._detect_tool 的确定性识别
+    # （与工作台 /api/chat 同一套 core 逻辑，core 为单一可信源），命中即直接
+    # 执行工具并返回结果，不再消耗一次 LLM 调用。
+    _det = rag._detect_tool(body.message or "")
+    if _det:
+        _tname, _targs = _det
+        _tr = rag._run_tool(p.tenant_id, _tname, _targs)
+        _ans = _tr.get("answer", "")
+        model_hub.record_task(p.tenant_id, "chat", body.message, "tool", body.strategy,
+                              [mid], _tname, True, 0, 0, 0, _ans)
+        return {"ok": True, "text": _ans, "mode": "tool", "tool": _tname,
+                "routed": {**rid, "reason": "已识别为工具指令，直接执行：" + _tname},
+                "auto": not body.model_id}
+
     r = model_hub.chat(mid, SYS, body.message, body.history, p.tenant_id, body.temperature)
     # 自动路由首选模型不可用时，回退到默认模型，保证回答不中断；指定模型失败不回退，避免违逆用户选择
     if (not r.get("ok")) and (not body.model_id):
