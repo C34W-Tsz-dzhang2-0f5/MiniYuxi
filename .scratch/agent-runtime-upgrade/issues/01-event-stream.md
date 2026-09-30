@@ -1,6 +1,6 @@
 # 01 · 事件流 SSE（agent_loop emit + /api/wb/chat/stream + 前端流式渲染）
 
-Status: `ready-for-agent`
+Status: `done`（代码+测试+闸门绿；S4 真实浏览器回归待补）
 Depends on: —
 Owner: —
 
@@ -21,11 +21,12 @@ Owner: —
 4. 零新依赖（FastAPI `StreamingResponse` 内置）。
 
 ## 验收（先写失败测试）
-- [ ] `tests/_verify_event_stream.py`：三型事件齐 + 顺序正确（start→tool:call→tool:result→assistant→end）+ emit 异常不影响返回。
-- [ ] SSE 端点返回 `text/event-stream`，逐帧可 `json.loads`。
-- [ ] `agent_loop.run()` 不传 emit 时行为与返回值**完全不变**（回归断言）。
-- [ ] 接入 `scripts/verify.py` quick 子集。
+- [x] `tests/_verify_event_stream.py`：三型事件齐 + 顺序正确（start→tool:call→tool:result→assistant→end）+ emit 异常不影响返回。
+- [x] SSE 端点返回 `text/event-stream`，逐帧可 `json.loads`。
+- [x] `agent_loop.run()` 不传 emit 时行为与返回值**完全不变**（回归断言）。
+- [x] 接入 `scripts/verify.py` quick 子集（quick 8/8 绿）。
 - [ ] S4：huashu-chrome 真实浏览器验证「发消息→看到流式思考→最终答复」。
 
 ## Done
-- commit: _（实现后填）_
+- commit: `21cf358` feat(agent): 事件流 SSE——agent_loop emit + /api/wb/chat/stream + 前端流式渲染
+- 备注：`tests/_verify_event_stream.py` 20/20 通过。S4 真实浏览器回归与 02 号票一并做。

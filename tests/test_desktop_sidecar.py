@@ -20,6 +20,11 @@ import sys
 import time
 from pathlib import Path
 
+try:                       # pytest 仅 pytest 路径需要；`python tests/test_desktop_sidecar.py` 免装也能跑
+    import pytest
+except ImportError:        # pragma: no cover
+    pytest = None
+
 REPO = Path(__file__).resolve().parent.parent
 TOUR = REPO / "examples" / "desktop_tour" / "code.py"
 
@@ -43,7 +48,7 @@ def _viable_python() -> str | None:
     return sys.executable
 
 
-def test_make_token_ttl() -> tuple[bool, str]:
+def check_make_token_ttl() -> tuple[bool, str]:
     try:
         sys.path.insert(0, str(REPO))
         from core import auth
@@ -67,7 +72,7 @@ def test_make_token_ttl() -> tuple[bool, str]:
     return True, f"默认 {base_ttl}s · 自定义 {custom_ttl}s"
 
 
-def test_tour_end2end(py: str) -> tuple[bool, str]:
+def run_tour_end2end(py: str) -> tuple[bool, str]:
     if not TOUR.exists():
         return False, f"找不到 {TOUR}"
     env = dict(os.environ)
@@ -96,7 +101,7 @@ def main() -> int:
 
     results: list[tuple[str, bool, str]] = []
 
-    ok, msg = test_make_token_ttl()
+    ok, msg = check_make_token_ttl()
     results.append(("单元：auth.make_token(ttl=...)", ok, msg))
     print(f"  {'✓' if ok else '✗'} 单元 · {msg}")
 
@@ -106,7 +111,7 @@ def main() -> int:
         elif os.getenv("MINIYUXI_RUN_INTEGRATION") == "0":
             print("  · 跳过端到端：MINIYUXI_RUN_INTEGRATION=0")
         else:
-            ok, msg = test_tour_end2end(_viable_python())
+            ok, msg = run_tour_end2end(_viable_python())
             results.append(("端到端：examples/desktop_tour", ok, msg))
             print(f"  {'✓' if ok else '✗'} 端到端 · {msg}")
 
@@ -115,6 +120,36 @@ def main() -> int:
     print(f"  {passed}/{len(results)} 通过")
     print("=" * 70)
     return 0 if passed == len(results) else 1
+
+
+# --------------------------------------------------------------------------
+# pytest 入口
+#
+# 上面两个 check_* 是「返回 (bool, str)」的自检脚本风格函数，不是 pytest 测试：
+#   - 带参数（py: str）会被 pytest 当 fixture → fixture 'py' not found
+#   - 返回 tuple 而非 assert → 永远被判为 passed（假绿）
+# 所以改名为 check_*/run_* 只给 __main__ 用，这里再包一层真·pytest 测试。
+# --------------------------------------------------------------------------
+
+def test_make_token_ttl():
+    ok, msg = check_make_token_ttl()
+    assert ok, msg
+
+
+def test_tour_end2end():
+    """端到端 tour 默认不跑：需要拉起 sidecar，CI/单测里属于重活。
+
+    需要时用 `MINIYUXI_RUN_INTEGRATION=1 pytest tests/test_desktop_sidecar.py` 显式打开。
+    """
+    if os.getenv("MINIYUXI_RUN_INTEGRATION") == "0":
+        pytest.skip("MINIYUXI_RUN_INTEGRATION=0，显式关闭")
+    if not have_integration_deps():
+        pytest.skip("fastapi/uvicorn 不可用")
+    py = _viable_python()
+    if not py:
+        pytest.skip("找不到可用解释器")
+    ok, msg = run_tour_end2end(py)
+    assert ok, msg
 
 
 if __name__ == "__main__":

@@ -34,3 +34,13 @@ Issues = "https://github.com/C34W-Tsz-dzhang2-0f5/MiniYuxi/issues"
 # 显式声明，避免自动发现把 data/ web/ 等整包带进来
 py-modules = ["cli"]
 packages = ["core"]
+
+[tool.pytest.ini_options]
+# testpaths 限定只收 tests/，避免误收 examples/ web/ 里的同名文件
+testpaths = ["tests"]
+# 默认不收这些脚本式文件：import 期就 sys.exit() 或直接打 HTTP，
+# 历史上靠命令行 --ignore 绕过，现固化进配置
+addopts = "-q --ignore=tests/selftest.py"
+# 端到端 tour / smoke 需要活服务，默认关；需要时
+#   MINIYUXI_RUN_INTEGRATION=1 pytest tests/ -v
+filterwarnings = ["ignore::DeprecationWarning"]
