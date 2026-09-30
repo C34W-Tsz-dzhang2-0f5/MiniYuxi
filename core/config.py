@@ -45,12 +45,19 @@ LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "60"))
 # ---------- 成本硬熔断（企业级要素⑤）----------
 # 一次 agent 运行的硬上限；任一触发即熔断，不得继续产生 token。
 # 生产部署务必通过环境变量覆盖默认值（尤其 RUN_MAX_COST / TENANT_BUDGET）。
+AGENT_MAX_LOOPS = int(os.getenv("MINIYUXI_AGENT_MAX_LOOPS", "6"))  # ReAct 反思轮数上限（agent_loop）
 RUN_MAX_STEPS = int(os.getenv("MINIYUXI_RUN_MAX_STEPS", "30"))          # 单个运行最大步数（每步=一次工具执行）
 AGENT_TIMEOUT_MS = int(os.getenv("MINIYUXI_AGENT_TIMEOUT_MS", "120000"))  # 单运行超时（毫秒）
 RUN_MAX_TOKENS = int(os.getenv("MINIYUXI_RUN_MAX_TOKENS", "20000"))      # 单运行 token 上限
 RUN_MAX_COST = float(os.getenv("MINIYUXI_RUN_MAX_COST", "1.0"))          # 单运行成本上限（人民币）
 TENANT_BUDGET = float(os.getenv("MINIYUXI_TENANT_BUDGET", "0.0"))       # 租户累计成本上限（0=不限）
 RUNAWAY_REPEAT_LIMIT = int(os.getenv("MINIYUXI_RUNAWAY_REPEAT_LIMIT", "6"))  # 同一动作连续重复上限（失控循环）
+
+# 一致性护栏：单轮反思里每步至少 1 次 LLM + 1 次工具，故步数阈值必须大于轮数上限，
+# 否则 RUN_MAX_STEPS 会先于 AGENT_MAX_LOOPS 触发，轮数配置形同虚设（历史缺陷：
+# MAX_LOOPS 硬编码 6 而 max_steps=30，导致步数闸门永远不可达）。此处取较大者 +1。
+if RUN_MAX_STEPS <= AGENT_MAX_LOOPS:
+    RUN_MAX_STEPS = AGENT_MAX_LOOPS + 1
 
 # ---------- 联网搜索后端（T2）----------
 # 默认走企业级搜索（火山引擎/豆包，中文更准），失败自动回退 Bing → DuckDuckGo。

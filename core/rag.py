@@ -384,35 +384,63 @@ def _rag_single(system, question, history, tenant_id, hits, citations) -> dict:
     return {"answer": text, "citations": citations, "mode": "offline", "reason": res["err"]}
 
 
-def answer(tenant_id: str, question: str, top_k: int = 5, history: list | None = None) -> dict:
+def answer(tenant_id: str, question: str, top_k: int = 5, history: list | None = None,
+           emit=None) -> dict:
     """问答主入口（真·Agent 版）。
 
     路径：① 显式 'tool:' 前缀 → 直接调工具（快路径）；
           ② 离线/无 Key → 抽取式兜底（selftest 基线，行为不变）；
           ③ 在线 → 自主 Agent Loop（rag.agent_loop.run），LLM 自己决定调哪些工具、几步完成；
           对话摘要持久化到服务端记忆（T3），关键经验沉淀 skills（T6）。
+
+    emit（2026-09-30 新增）：可选回调 fn(event_dict)，旁路把 Agent Loop 的过程事件
+    （lifecycle / tool / assistant）透传给上层 SSE。**绝不影响主链路**——快路径、
+    离线兜底、法条闸门等分支也会各发一条 lifecycle，前端据此收尾。
     """
+    def _say(phase, **kw):
+        if emit is None:
+            return
+        try:
+            emit({"type": "lifecycle", "payload": dict({"phase": phase}, **kw)})
+        except Exception:
+            pass
+
     hits = search(tenant_id, question, top_k)
     citations = [{"doc_id": h["doc_id"], "title": h["title"], "text": h["text"][:200], "score": h["score"]} for h in hits]
 
     # 坑2 防护（360 七坑）：legal/labor 意图且未命中知识库 → 硬闸门拒绝自由生成法条
     block = citation_gate.evaluate(question, hits)
     if block is not None:
+        _say("end", phase_reason="citation_gate")
         return block
 
     # ① 显式前缀快路径
     tool_hit = _detect_tool(question)
     if tool_hit:
         name, args = tool_hit
+        if emit is not None:
+            try:
+                emit({"type": "tool", "payload": {"event": "call", "tool": name, "args": args}})
+            except Exception:
+                pass
         res = _run_tool(tenant_id, name, args)
+        if emit is not None:
+            try:
+                emit({"type": "tool", "payload": {"event": "result", "tool": name,
+                                                  "result": str(res.get("answer", ""))[:600]}})
+                emit({"type": "assistant", "payload": {"delta": res.get("answer", "")}})
+            except Exception:
+                pass
         try:
             from . import skills
             skills.learn(tenant_id, question, res.get("answer", ""))
         except Exception:
             pass
+        _say("end", tool_calls_used=[name])
         return res
 
     if not hits:
+        _say("end", phase_reason="empty")
         return {"answer": "知识库中未检索到相关内容，请先上传制度文档。", "citations": [], "mode": "empty"}
 
     context = "\n\n".join(f"[{i+1}] 来源：{h['title']}\n{h['text']}" for i, h in enumerate(hits))
@@ -423,18 +451,24 @@ def answer(tenant_id: str, question: str, top_k: int = 5, history: list | None =
         final_text = (f"【离线兜底 · 未配置模型 Key，以下为原文摘录】\n{best['text'][:500]}\n"
                       f"（依据来源：{best['title']}）")
         out = {"answer": final_text, "citations": citations, "mode": "offline", "reason": "no-api-key"}
+        if emit is not None:
+            try:
+                emit({"type": "assistant", "payload": {"delta": final_text}})
+            except Exception:
+                pass
         try:
             from . import skills
             skills.learn(tenant_id, question, final_text)
         except Exception:
             pass
+        _say("end", phase_reason="offline")
         return out
 
     # ③ 在线 → 自主 Agent Loop（大脑）
     from . import agent_loop, memory
     mem = memory.recall(tenant_id, limit=8)
     system = _agent_system(context, len(hits))
-    res = agent_loop.run(system, question, history, tenant_id=tenant_id, memories=mem)
+    res = agent_loop.run(system, question, history, tenant_id=tenant_id, memories=mem, emit=emit)
     if res is None:
         out = _rag_single(system, question, history, tenant_id, hits, citations)
     else:
@@ -442,6 +476,11 @@ def answer(tenant_id: str, question: str, top_k: int = 5, history: list | None =
         out = {"answer": res["answer"], "citations": citations, "mode": "agent",
                "model": res["model"], "tool_calls_used": res["tool_calls_used"],
                "loop_trace": res["loop_trace"], "memories_used": res["memories_used"]}
+        if res.get("pending_approval"):
+            out["pending_approval"] = res["pending_approval"]
+        if res.get("circuit_open"):
+            out["circuit_open"] = True
+            out["circuit_reason"] = res.get("circuit_reason")
         if warn:
             out["warnings"] = ["答案中的数字 " + "、".join(warn) + " 未在原文中出现，请核对引用"]
     # 坑2 防护（360 七坑）：legal/labor 意图且答案编造了 KB 中不存在的法规引用 → 拒绝

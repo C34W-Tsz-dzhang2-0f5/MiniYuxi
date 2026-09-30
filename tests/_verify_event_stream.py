@@ -11,7 +11,7 @@ import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core import agent_loop, gateway, config, wb_workbench  # noqa: E402
+from core import agent_loop, config, provider_router, wb_workbench  # noqa: E402
 
 FAILS = []
 
@@ -24,28 +24,33 @@ def check(name, cond, extra=""):
         FAILS.append(name)
 
 
-# ---------- 公共夹具：假网关（第一次返回工具调用，第二次返回终答） ----------
-_real_cwt = gateway.chat_with_tools
+# ---------- 公共夹具：假 LLM 出口（第一次返回工具调用，第二次返回终答） ----------
+# 2026-09-30：agent_loop 的 LLM 出口已从 gateway 切到 provider_router
+# （多供应商故障转移），桩必须打在 provider_router 上，否则测的是旧路径。
+_real_cwt = provider_router.chat_with_tools
 _real_enabled = config.llm_enabled
 
 
 def _install_fake_gateway():
     state = {"n": 0}
 
-    def fake(system, messages, tools, history=None, provider=None, tenant_id=None, model=None):
+    def fake(system, messages, tools=None, provider_id=None, model=None,
+             tenant_id=None, conn=None, temperature=None):
         state["n"] += 1
         if state["n"] == 1:
-            return {"ok": True, "text": "我先看下时间", "usage": None,
+            return {"ok": True, "text": "我先看下时间", "usage": None, "cost": None,
+                    "attempts": [],
                     "tool_calls": [{"id": "tc1", "name": "current_time", "arguments": {}}]}
-        return {"ok": True, "text": "现在是 2026 年。", "tool_calls": [], "usage": None}
+        return {"ok": True, "text": "现在是 2026 年。", "tool_calls": [], "usage": None,
+                "cost": None, "attempts": []}
 
-    gateway.chat_with_tools = fake
+    provider_router.chat_with_tools = fake
     config.llm_enabled = lambda: True
     return state
 
 
 def _restore():
-    gateway.chat_with_tools = _real_cwt
+    provider_router.chat_with_tools = _real_cwt
     config.llm_enabled = _real_enabled
 
 

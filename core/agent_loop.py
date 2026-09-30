@@ -10,9 +10,29 @@
 - T3 服务端记忆在 run() 入口注入 system；T4 规划通过 system 引导 + 自然多轮 tool call 体现。
 """
 import json
-from . import config, gateway, rag, tools_registry
+from . import config, gateway, provider_router, rag, tools_registry
 
-MAX_LOOPS = 6
+# ReAct 反思轮数上限：2026-09-30 起由 core/config.py 统一管理（环境变量
+# MINIYUXI_AGENT_MAX_LOOPS），不再是硬编码。config 在 import 期读取环境变量，
+# 测试可用 importlib.reload(config) 覆盖。
+MAX_LOOPS = int(getattr(config, "AGENT_MAX_LOOPS", 6) or 6)
+
+
+def _llm_chat(system, messages, tools, tenant_id=None, provider=None, model=None):
+    """Agent Loop 的 LLM 出口：走 provider_router 以获得多供应商故障转移。
+
+    为什么不再直连 gateway：gateway 只有单一 config 单例，供应商 429/5xx/超时后
+    直接返回 offline，Agent 在生产上会毫无征兆地退化。provider_router 提供
+    「出境闸门 → 瞬断重试 → 按优先级切下一个供应商 → 离线兜底」的完整链路，
+    对应 OpenClaw §4.3 failover 语义。
+
+    兼容性：provider_router.chat_with_tools 的返回结构与 gateway.chat_with_tools
+    一致（ok/text/tool_calls/err/usage），调用方无需改动。
+    """
+    return provider_router.chat_with_tools(
+        system, messages, tools,
+        provider_id=provider, model=model, tenant_id=tenant_id,
+    )
 
 
 def _to_openai_tools(allowed_toolsets=None) -> list:
@@ -170,12 +190,19 @@ def run(system: str, user_prompt: str, history: list | None = None,
             circuit_open, circuit_reason = True, reason
             break
         with observability.span("llm", kind="llm", tenant_id=tenant_id) as lsp:
-            res = gateway.chat_with_tools(system, messages, tools, tenant_id=tenant_id,
-                                          provider=provider, model=model)
+            res = _llm_chat(system, messages, tools, tenant_id=tenant_id,
+                            provider=provider, model=model)
         if not res["ok"]:
             lsp.set_status("offline")
-            _emit(emit, "lifecycle", {"phase": "error", "error": "gateway_offline", "trace_id": tid})
-            return None  # 网关失败（如限流）→ caller 退化
+            _emit(emit, "lifecycle", {"phase": "error", "error": res.get("err") or "gateway_offline",
+                                      "attempts": res.get("attempts") or [], "trace_id": tid})
+            return None  # 全供应商失败（如限流/宕机）→ caller 退化
+        # 故障转移留痕：本次实际由哪个供应商应答，切了几次（排障/对账用）。
+        if len(res.get("attempts") or []) > 1 or res.get("provider") not in (None, provider):
+            _emit(emit, "lifecycle", {
+                "phase": "failover", "provider": res.get("provider"),
+                "attempts": res.get("attempts") or [], "trace_id": tid,
+            })
         u = res.get("usage")
         if u:
             pt = (u.get("prompt_tokens") or 0)
@@ -260,9 +287,8 @@ def run(system: str, user_prompt: str, history: list | None = None,
                 try:
                     with observability.span("llm:pending_notice", kind="llm",
                                             tenant_id=tenant_id) as psp:
-                        nres = gateway.chat_with_tools(system, messages, [],
-                                                       tenant_id=tenant_id,
-                                                       provider=provider, model=model)
+                        nres = _llm_chat(system, messages, [], tenant_id=tenant_id,
+                                         provider=provider, model=model)
                     if nres.get("ok") and nres.get("text"):
                         final_text = nres["text"]
                         _emit(emit, "assistant", {"delta": nres["text"]})

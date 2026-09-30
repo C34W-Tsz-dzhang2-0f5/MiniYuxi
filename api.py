@@ -416,28 +416,59 @@ def chat(body: ChatIn, stream: bool = False, p: auth.Principal = Depends(need("c
     if not stream:
         return rag.answer(p.tenant_id, body.question, body.top_k, body.history or None)
 
-    # ---- T5 SSE 流式：逐 token 推送给前端 ----
+    # ---- T5 SSE 真流式（2026-09-30 改造）：消费 agent_loop._emit 的过程事件 ----
+    # 旧实现是"先跑完整轮，再按 12 字符切片 + sleep(0.01) 假流式"，用户看到的是
+    # 憋十几秒后的一段动画，无法反映 Agent 真实进度（工具调了几次、是否熔断、
+    # 是否发生供应商故障转移全部不可见）。现改为 worker 线程跑同步链路 +
+    # Queue 桥接，事件到达即下发。
+    #
+    # 帧契约（向后兼容）：
+    #   event: lifecycle / tool / assistant —— 新增，过程事件
+    #   event: message   {"delta": "..."}    —— 保留，等价于 assistant 文本增量
+    #   event: meta      {...}               —— 保留，末帧携带 citations/loop_trace 等
+    #   event: done                          —— 保留，恒为最后一帧
     def _event(payload: dict, name: str = "message") -> str:
-        return f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+        return f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
 
     def _gen():
-        try:
-            # 统一走自主 Agent Loop（rag.answer 内部已含 agent loop / 记忆 / 离线兜底 / skills）
-            d = rag.answer(p.tenant_id, body.question, body.top_k, body.history or None)
-            meta = {"citations": d.get("citations", []), "mode": d.get("mode")}
-            if d.get("tool_calls_used"):
-                meta["tool_calls_used"] = d["tool_calls_used"]
-            if d.get("loop_trace"):
-                meta["loop_trace"] = d["loop_trace"]
-            if d.get("warnings"):
-                meta["warnings"] = d["warnings"]
-            yield _event(meta, "meta")
-            ans = d.get("answer", "")
-            for i in range(0, len(ans), 12):
-                yield _event({"delta": ans[i:i + 12]})
-                time.sleep(0.01)
-        except Exception as exc:
-            yield _event({"error": str(exc)[:200]})
+        import queue as _queue
+        import threading as _threading
+
+        q: "_queue.Queue" = _queue.Queue()
+
+        def _on_event(ev):
+            q.put(ev)
+
+        def _worker():
+            try:
+                d = rag.answer(p.tenant_id, body.question, body.top_k,
+                               body.history or None, emit=_on_event)
+                meta = {"citations": d.get("citations", []), "mode": d.get("mode")}
+                for k in ("tool_calls_used", "loop_trace", "warnings",
+                          "pending_approval", "circuit_open", "circuit_reason", "model"):
+                    if d.get(k):
+                        meta[k] = d[k]
+                q.put({"type": "meta", "payload": meta})
+            except Exception as exc:  # noqa: BLE001
+                q.put({"type": "lifecycle",
+                       "payload": {"phase": "error", "error": f"{type(exc).__name__}: {exc}"[:200]}})
+            finally:
+                q.put(None)
+
+        t = _threading.Thread(target=_worker, daemon=True)
+        t.start()
+        while True:
+            ev = q.get()
+            if ev is None:
+                break
+            etype = ev.get("type", "message")
+            payload = ev.get("payload", {}) or {}
+            if etype == "assistant":
+                # 双发：assistant 给新前端，message 保持老前端可用
+                yield _event(payload, "assistant")
+                yield _event({"delta": payload.get("delta", "")}, "message")
+            else:
+                yield _event(payload, etype)
         yield _event({}, "done")
 
     return StreamingResponse(

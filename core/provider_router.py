@@ -11,7 +11,7 @@
 import json
 import time
 import requests
-from . import db, usage
+from . import config, db, usage
 
 MAX_RETRIES = 3
 OFFLINE_ID = "offline"
@@ -85,6 +85,31 @@ def _enabled_ordered(conn):
     return [dict(r) for r in rows]
 
 
+def _fallback_providers() -> list:
+    """注册表为空时的环境变量回落（单供应商部署的默认路径）。
+
+    llm_providers 表需要显式注册才有数据，而 config.LLM_PROVIDERS 一直带着
+    LLM_API_KEY。agent_loop 改走本模块后若不做回落，未注册过的部署会全部退化为
+    offline —— 表现为"明明配了 Key 却说离线"。故此处以 config 为单一可信源兜底。
+    """
+    out = []
+    for p in (getattr(config, "LLM_PROVIDERS", None) or []):
+        if not isinstance(p, dict):
+            continue
+        kind = p.get("kind", "openai")
+        out.append({
+            "id": p.get("id", "siliconflow"),
+            "name": p.get("name", p.get("id", "")),
+            "kind": kind,
+            "base_url": p.get("base_url", "") or "",
+            "api_key": p.get("api_key", "") or "",
+            "model": p.get("model", "") or "",
+            "priority": int(p.get("priority", 0) or 0),
+            "enabled": bool(p.get("enabled", True)),
+        })
+    return [p for p in out if p["kind"] != OFFLINE_ID and p["api_key"] and p["base_url"]]
+
+
 def _post(payload: dict, prov: dict, tenant_id=None):
     # 出境闸门：多供应商故障转移会依次打到不同 base_url，每一次都须过闸（否则
     # 「切一个供应商就绕过管控」）。被拒 → 视为该供应商失败，继续走下一个/离线兜底。
@@ -92,12 +117,13 @@ def _post(payload: dict, prov: dict, tenant_id=None):
     if egress.blocked("llm", prov.get("base_url", ""), payload, tenant_id=tenant_id):
         return None, "egress_denied"
     last = ""
+    timeout = int(getattr(config, "LLM_TIMEOUT", 60) or 60)
     for attempt in range(MAX_RETRIES):
         try:
             resp = requests.post(
                 f"{prov['base_url'].rstrip('/')}/chat/completions",
                 headers={"Authorization": f"Bearer {prov['api_key']}"},
-                json=payload, timeout=60,
+                json=payload, timeout=timeout,
             )
             resp.raise_for_status()
             return resp, None
@@ -120,20 +146,14 @@ def chat(system, prompt, history=None, provider_id=None, tenant_id=None, conn=No
     llm_fn 仅用于测试注入（签名 (prov, payload)->(text_or_None, err)），生产走真实 HTTP。
     """
     c = conn or db.connect()
-    # 1) 选定主供应商
-    prov = _provider_by_id(provider_id, c) if provider_id else None
-    if prov is None:
-        aid = get_active(c)
-        prov = _provider_by_id(aid, c) if aid else None
-    if prov is None:
-        prov = (_enabled_ordered(c) or [None])[0]
+    # 1) 选定主供应商 + 故障转移顺序（与 chat_with_tools 共用同一套解析规则）
+    prov, order = _order_for(provider_id, c)
     if prov is None or prov["kind"] == OFFLINE_ID or not prov.get("api_key"):
         usage.record(tenant_id, "llm", "offline", prompt_text=prompt, completion_text="")
         return {"ok": False, "text": "", "err": "offline", "model": "offline",
                 "provider": OFFLINE_ID, "usage": None}
 
     # 2) 尝试主供应商 + 故障转移
-    order = [prov] + [p for p in _enabled_ordered(c) if p["id"] != prov["id"]]
     messages = [{"role": "system", "content": system}]
     for h in (history or [])[-10:]:
         if isinstance(h, dict) and h.get("role") in ("user", "assistant") and h.get("content"):
@@ -158,3 +178,119 @@ def chat(system, prompt, history=None, provider_id=None, tenant_id=None, conn=No
     usage.record(tenant_id, "llm", "offline", prompt_text=prompt, completion_text="")
     return {"ok": False, "text": "", "err": "all_providers_failed", "model": "offline",
             "provider": OFFLINE_ID, "usage": None}
+
+
+def _order_for(provider_id, c):
+    """解析主供应商 + 故障转移顺序。显式 provider_id > active > 首个 enabled。
+
+    注册表为空时回落 config.LLM_PROVIDERS（见 _fallback_providers 注释）。
+    """
+    prov = _provider_by_id(provider_id, c) if provider_id else None
+    if prov is None:
+        aid = get_active(c)
+        prov = _provider_by_id(aid, c) if aid else None
+    pool = _enabled_ordered(c) or _fallback_providers()
+    if prov is None:
+        prov = (pool or [None])[0]
+    if prov is None:
+        return None, []
+    rest = [p for p in pool if p["id"] != prov["id"]]
+    return prov, [prov] + rest
+
+
+def _record_usage(tenant_id, model_name, prompt_text, completion_text, u):
+    """统一记账：token + 成本（有真实 usage 时按 usage.price 精算）。"""
+    pt = ct = None
+    cost = None
+    if u:
+        pt = u.get("prompt_tokens")
+        ct = u.get("completion_tokens")
+        if u.get("total_tokens"):
+            try:
+                pin, pout = usage.price(model_name)
+            except Exception:
+                pin = pout = 0.0
+            cost = (pt or 0) / 1000.0 * pin + (ct or 0) / 1000.0 * pout
+    try:
+        usage.record(tenant_id, "llm", model_name, prompt_text=prompt_text,
+                     completion_text=completion_text or "",
+                     prompt_tokens=pt, completion_tokens=ct, cost=cost)
+    except Exception:
+        pass
+    return pt, ct, cost
+
+
+def _parse_tool_calls(msg: dict) -> list:
+    """OpenAI 兼容 tool_calls → [{name, arguments(dict), id}]。参数非法时降级为 {}。"""
+    out = []
+    for tc in (msg.get("tool_calls") or []):
+        fn = tc.get("function", {}) or {}
+        try:
+            args = json.loads(fn.get("arguments") or "{}")
+        except Exception:
+            args = {}
+        out.append({"name": fn.get("name", ""), "arguments": args, "id": tc.get("id", "")})
+    return out
+
+
+def chat_with_tools(system: str, messages: list, tools: list | None = None,
+                    provider_id: str | None = None, model: str | None = None,
+                    tenant_id=None, conn=None, temperature: float | None = None) -> dict:
+    """带 function calling 的多供应商路由（agent_loop 的 LLM 出口）。
+
+    与 chat() 共享同一套「供应商解析 → 出境闸门 → 瞬断重试 → 顺序故障转移 → 离线兜底」，
+    额外携带 tools/tool_choice 并解析 tool_calls。
+
+    返回结构与 gateway.chat_with_tools 保持兼容：
+      {ok, text, tool_calls, err, model, provider, usage, cost, attempts}
+    attempts 记录每个供应商的失败原因，供 emit 上报与排障（OpenClaw §4.3 failover 语义）。
+    """
+    c = conn or db.connect()
+    prov, order = _order_for(provider_id, c)
+    if prov is None or prov.get("kind") == OFFLINE_ID or not prov.get("api_key"):
+        usage.record(tenant_id, "llm", "offline", prompt_text=str(messages), completion_text="")
+        return {"ok": False, "text": "", "tool_calls": [], "err": "offline",
+                "model": "offline", "provider": OFFLINE_ID, "usage": None,
+                "cost": None, "attempts": []}
+
+    full_msgs = [{"role": "system", "content": system}] + list(messages or [])
+    base_payload = {
+        "messages": full_msgs,
+        "temperature": config.LLM_TEMPERATURE if temperature is None else temperature,
+        "tools": tools or [],
+        "tool_choice": "auto",
+    }
+    attempts = []
+    for p in order:
+        if not p.get("api_key") or p.get("kind") == OFFLINE_ID:
+            continue
+        # model 覆盖只对显式指定生效；否则用各供应商自己的默认模型（故障转移后
+        # 不能继续用主供应商的模型名 —— 部分 OpenAI 兼容网关会直接 400）。
+        eff_model = model if (model and p["id"] == prov["id"]) else p["model"]
+        payload = dict(base_payload, model=eff_model)
+        resp, err = _post(payload, p, tenant_id)
+        if resp is None:
+            attempts.append({"provider": p["id"], "model": eff_model, "ok": False, "err": err})
+            continue
+        try:
+            js = resp.json()
+            msg = js["choices"][0]["message"]
+        except Exception as exc:
+            attempts.append({"provider": p["id"], "model": eff_model,
+                             "ok": False, "err": "bad_response: %s" % str(exc)[:120]})
+            continue
+        text = msg.get("content") or ""
+        u = js.get("usage")
+        _, _, cost = _record_usage(tenant_id, eff_model, str(messages), text, u)
+        u = dict(u) if isinstance(u, dict) else {}
+        u["cost"] = cost
+        attempts.append({"provider": p["id"], "model": eff_model, "ok": True, "err": ""})
+        return {"ok": True, "text": text, "tool_calls": _parse_tool_calls(msg),
+                "err": "", "model": eff_model, "provider": p["id"],
+                "usage": u, "cost": cost, "attempts": attempts}
+
+    usage.record(tenant_id, "llm", "offline", prompt_text=str(messages), completion_text="")
+    return {"ok": False, "text": "", "tool_calls": [], "err": "all_providers_failed",
+            "model": "offline", "provider": OFFLINE_ID, "usage": None,
+            "cost": None, "attempts": attempts}
+

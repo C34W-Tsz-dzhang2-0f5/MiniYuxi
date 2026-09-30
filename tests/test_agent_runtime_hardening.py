@@ -77,7 +77,7 @@ class TestPendingApproval(unittest.TestCase):
         pending = {"status": "pending", "approval_id": "AP-123", "tool_name": "danger_tool"}
 
         with mock.patch("core.config.llm_enabled", return_value=True), \
-             mock.patch("core.gateway.chat_with_tools", side_effect=llm_responses) as gw, \
+             mock.patch("core.provider_router.chat_with_tools", side_effect=llm_responses) as gw, \
              mock.patch("core.tools_registry.list_tools", return_value=[]), \
              mock.patch("core.tools_registry.run_tool_governed", return_value=pending):
             res = agent_loop.run("sys", "做危险操作", tenant_id="t1")
@@ -109,7 +109,7 @@ class TestCancellation(unittest.TestCase):
         llm = {"ok": True, "text": "", "tool_calls": [_fake_tool_call("c1", "t", {})],
                "usage": None}
         with mock.patch("core.config.llm_enabled", return_value=True), \
-             mock.patch("core.gateway.chat_with_tools", return_value=llm), \
+             mock.patch("core.provider_router.chat_with_tools", return_value=llm), \
              mock.patch("core.tools_registry.list_tools", return_value=[]), \
              mock.patch("core.tools_registry.run_tool_governed",
                         return_value={"result": "ok"}):
@@ -121,7 +121,7 @@ class TestCancellation(unittest.TestCase):
     def test_cancel_false_runs_normally(self):
         llm = {"ok": True, "text": "完成", "tool_calls": [], "usage": None}
         with mock.patch("core.config.llm_enabled", return_value=True), \
-             mock.patch("core.gateway.chat_with_tools", return_value=llm), \
+             mock.patch("core.provider_router.chat_with_tools", return_value=llm), \
              mock.patch("core.tools_registry.list_tools", return_value=[]):
             res = agent_loop.run("sys", "问一句", cancel_check=lambda: False)
         self.assertFalse(res.get("cancelled"))
@@ -161,7 +161,7 @@ class TestMultitenantGate(unittest.TestCase):
         with mock.patch("core.config.llm_enabled", return_value=True), \
              mock.patch("core.multitenant.enforce",
                         return_value={"allow": False, "reason": "quota_daily_calls_exceeded"}), \
-             mock.patch("core.gateway.chat_with_tools", return_value=llm) as gw:
+             mock.patch("core.provider_router.chat_with_tools", return_value=llm) as gw:
             res = agent_loop.run("sys", "超额请求", tenant_id="t1")
         self.assertTrue(res.get("blocked"), "配额超额应被拦")
         self.assertEqual(res.get("block_reason"), "quota_daily_calls_exceeded")
@@ -171,7 +171,7 @@ class TestMultitenantGate(unittest.TestCase):
         llm = {"ok": True, "text": "正常答复", "tool_calls": [], "usage": None}
         with mock.patch("core.config.llm_enabled", return_value=True), \
              mock.patch("core.multitenant.enforce", return_value={"allow": True, "reason": "ok"}), \
-             mock.patch("core.gateway.chat_with_tools", return_value=llm):
+             mock.patch("core.provider_router.chat_with_tools", return_value=llm):
             res = agent_loop.run("sys", "正常", tenant_id="t1")
         self.assertFalse(res.get("blocked"))
         self.assertEqual(res.get("answer"), "正常答复")
@@ -181,7 +181,7 @@ class TestMultitenantGate(unittest.TestCase):
         llm = {"ok": True, "text": "兜底成功", "tool_calls": [], "usage": None}
         with mock.patch("core.config.llm_enabled", return_value=True), \
              mock.patch("core.multitenant.enforce", side_effect=RuntimeError("db down")), \
-             mock.patch("core.gateway.chat_with_tools", return_value=llm):
+             mock.patch("core.provider_router.chat_with_tools", return_value=llm):
             res = agent_loop.run("sys", "正常", tenant_id="t1")
         self.assertIsNotNone(res, "闸门异常不得让整个 run 崩掉")
         self.assertEqual(res.get("answer"), "兜底成功")
