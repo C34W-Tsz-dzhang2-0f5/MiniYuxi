@@ -1590,6 +1590,28 @@ def wb_chat(body: dict, p: auth.Principal = Depends(need("chat"))):
     )
 
 
+@app.post("/api/wb/chat/stream")
+def wb_chat_stream(body: dict, p: auth.Principal = Depends(need("chat"))):
+    """SSE 流式对话（01 号票）：把 Agent 过程事件（lifecycle/tool/assistant）实时推给前端。
+
+    与 /api/wb/chat 等价，但以 text/event-stream 逐帧推送；末帧 event:final 携带完整结果。
+    契约见 CONTEXT.md §三「event_stream」。
+    """
+    return StreamingResponse(
+        wb_workbench.chat_stream(
+            p.tenant_id, body.get("message", ""), scene=body.get("scene", ""),
+            history=body.get("history"), mode=body.get("mode", "agent"),
+            allow_full_access=bool(body.get("allow_full_access", True)),
+            expert=body.get("expert"), skill=body.get("skill"),
+            connector_ids=body.get("connector_ids") or [],
+            attached_doc_ids=body.get("attached_doc_ids") or [],
+            provider=body.get("provider"), model=body.get("model"),
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.get("/api/wb/stats")
 def wb_stats(p: auth.Principal = Depends(need("chat"))):
     return wb_workbench.stats(p.tenant_id)

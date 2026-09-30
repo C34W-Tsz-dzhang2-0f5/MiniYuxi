@@ -213,7 +213,7 @@ def chat(tenant_id: str, message: str, scene: str = "",
          allow_full_access: bool = True, expert: str | None = None,
          skill: str | None = None, connector_ids: list[str] | None = None,
          attached_doc_ids: list[str] | None = None,
-         model_id: str = "", strategy: str = "balanced") -> dict:
+         model_id: str = "", strategy: str = "balanced", emit=None) -> dict:
     """复刻页对话。
 
     model_id 形如 `siliconflow:Qwen/Qwen2.5-72B-Instruct`；非空时走多模型中枢 model_hub，
@@ -293,7 +293,7 @@ def chat(tenant_id: str, message: str, scene: str = "",
                 except Exception:
                     _mid = ""
             ares = agent_loop.run(system, prompt, history or [], tenant_id=tenant_id,
-                                  provider=provider, model=(model or _mid or None))
+                                  provider=provider, model=(model or _mid or None), emit=emit)
         except Exception:
             ares = None
         if ares is not None:
@@ -344,6 +344,53 @@ def chat(tenant_id: str, message: str, scene: str = "",
     return {"ok": ok, "reply": reply, "sources": sources, "degraded": degraded, "err": err,
             "mode": mode, "routed": routed, "tool_calls_used": tool_calls_used,
             "loop_trace": loop_trace, "trace_id": trace_id}
+
+
+def chat_stream(tenant_id: str, message: str, scene: str = "",
+                history: list[dict] | None = None, mode: str = "agent",
+                allow_full_access: bool = True, expert: str | None = None,
+                skill: str | None = None, connector_ids: list[str] | None = None,
+                attached_doc_ids: list[str] | None = None,
+                provider: str | None = None, model: str | None = None):
+    """SSE 帧生成器（01 号票）：把 chat() 的过程事件实时 yield 出去。
+
+    帧格式（SSE 规范）：`event: <type>\\ndata: <json>\\n\\n`
+    事件型：`lifecycle` / `tool` / `assistant` / `final`（final 携带最终完整结果）。
+    实现：agent_loop 是同步的，用 worker 线程跑 chat() + Queue 桥接，实现真流式。
+    """
+    import json as _json
+    import queue as _queue
+    import threading as _threading
+
+    q: "_queue.Queue" = _queue.Queue()
+
+    def _emit(ev):
+        q.put(ev)
+
+    def _worker():
+        try:
+            res = chat(tenant_id, message, scene=scene, history=history, mode=mode,
+                       allow_full_access=allow_full_access, expert=expert, skill=skill,
+                       connector_ids=connector_ids, attached_doc_ids=attached_doc_ids,
+                       provider=provider, model=model, emit=_emit)
+            q.put({"type": "final", "payload": res})
+        except Exception as e:  # noqa: BLE001
+            q.put({"type": "lifecycle",
+                   "payload": {"phase": "error", "error": f"{type(e).__name__}: {e}"}})
+        finally:
+            q.put(None)
+
+    t = _threading.Thread(target=_worker, daemon=True)
+    t.start()
+    while True:
+        ev = q.get()
+        if ev is None:
+            break
+        try:
+            data = _json.dumps(ev.get("payload", {}), ensure_ascii=False, default=str)
+        except Exception:
+            data = "{}"
+        yield f"event: {ev.get('type', 'message')}\ndata: {data}\n\n"
 
 
 def stats(tenant_id: str = "default") -> dict:

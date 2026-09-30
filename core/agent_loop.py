@@ -39,9 +39,19 @@ def _to_openai_tools(allowed_toolsets=None) -> list:
     return tools
 
 
+def _emit(emit, etype: str, payload: dict) -> None:
+    """旁路观测：emit 事件给调用方（如 SSE 流）。**绝不影响主链路**。"""
+    if emit is None:
+        return
+    try:
+        emit({"type": etype, "payload": payload})
+    except Exception:
+        pass
+
+
 def run(system: str, user_prompt: str, history: list | None = None,
         tenant_id: str = None, memories: list | None = None, trace_id: str = None,
-        provider: str | None = None, model: str | None = None) -> dict | None:
+        provider: str | None = None, model: str | None = None, emit=None) -> dict | None:
     """执行自主循环。返回 {answer, mode, model, tool_calls_used, loop_trace, memories_used, trace_id}
     或 None（离线/网关失败，由 caller 退化）。
 
@@ -55,6 +65,7 @@ def run(system: str, user_prompt: str, history: list | None = None,
     from . import observability, circuit_breaker, soc_audit
     tid = observability.start_trace(trace_id)
     guard = circuit_breaker.BudgetGuard(tenant_id=tenant_id)
+    _emit(emit, "lifecycle", {"phase": "start", "trace_id": tid})
 
     tools = _to_openai_tools()
     messages = []
@@ -91,6 +102,7 @@ def run(system: str, user_prompt: str, history: list | None = None,
                                           provider=provider, model=model)
         if not res["ok"]:
             lsp.set_status("offline")
+            _emit(emit, "lifecycle", {"phase": "error", "error": "gateway_offline", "trace_id": tid})
             return None  # 网关失败（如限流）→ caller 退化
         u = res.get("usage")
         if u:
@@ -98,6 +110,8 @@ def run(system: str, user_prompt: str, history: list | None = None,
         msg_content = res["text"]
         tool_calls = res["tool_calls"]
         last_assistant = msg_content or last_assistant
+        if msg_content:
+            _emit(emit, "assistant", {"delta": msg_content})
 
         asst_msg = {"role": "assistant", "content": msg_content or ""}
         if tool_calls:
@@ -119,6 +133,7 @@ def run(system: str, user_prompt: str, history: list | None = None,
                 circuit_open, circuit_reason = True, reason
                 inner_break = True
                 break
+            _emit(emit, "tool", {"event": "call", "tool": name, "args": args})
             with observability.span("tool:" + name, kind="tool", tenant_id=tenant_id) as tsp:
                 r = tools_registry.run_tool_governed(name, args, tenant_id=tenant_id, session_id=None)
                 if "error" in r:
@@ -131,6 +146,7 @@ def run(system: str, user_prompt: str, history: list | None = None,
                 out = "工具执行出错：" + str(r["error"])
             else:
                 out = json.dumps(r, ensure_ascii=False)
+            _emit(emit, "tool", {"event": "result", "tool": name, "result": out[:600]})
             used_tools.append(name)
             loop_trace.append({"tool": name, "args": args, "result": out[:600]})
             messages.append({"role": "tool", "tool_call_id": tc["id"], "name": name, "content": out[:1600]})
@@ -139,6 +155,8 @@ def run(system: str, user_prompt: str, history: list | None = None,
 
     if not final_text:
         final_text = last_assistant or "（未能生成最终回答）"
+
+    _emit(emit, "lifecycle", {"phase": "end", "tool_calls_used": used_tools, "trace_id": tid})
 
     result = {
         "answer": final_text,

@@ -37,7 +37,7 @@ _real_run = agent_loop.run
 
 
 def _fake_run(system, user_prompt, history=None, tenant_id=None, memories=None,
-              trace_id=None, provider=None, model=None):
+              trace_id=None, provider=None, model=None, emit=None):
     calls["n"] += 1
     calls["kwargs"] = {"tenant_id": tenant_id, "provider": provider, "model": model}
     return {

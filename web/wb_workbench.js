@@ -2054,43 +2054,110 @@
       provider = localStorage.getItem('wb_provider') || '';
       model = localStorage.getItem('wb_model') || '';
     } catch (e) {}
+    var payload = {
+      message: text, scene: state.scene,
+      provider: provider || undefined, model: model || undefined,
+      mode: state.mode,
+      allow_full_access: state.allowFullAccess,
+      expert: state.expert || undefined,
+      skill: state.skill || undefined,
+      connector_ids: state.connectorIds,
+      attached_doc_ids: state.files.filter(function (f) { return f.id; }).map(function (f) { return f.id; })
+    };
+
     var api = ensureToken().then(function () {
       if (!TOKEN) {   // U1：无 token 不再静默降级，直接引导登录
         throw new Error('未登录');
       }
+      /* 01 号票：优先走 SSE 事件流，实时渲染「思考 / 工具调用 / 文本增量」 */
+      return fetch('/api/wb/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN },
+        body: JSON.stringify(payload)
+      });
+    }).then(function (r) {
+      if (!r.ok || !r.body || !r.body.getReader) throw new Error('no-stream');
+      thinking.querySelector('.msg-bubble').textContent = '';
+      return consumeStream(r, thinking);
+    }).catch(function () {
+      /* 降级：同步 /api/wb/chat（流不可用 / 未登录 / 网关异常） */
       return fetch('/api/wb/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN },
-        body: JSON.stringify({
-          message: text, scene: state.scene,
-          provider: provider || undefined, model: model || undefined,
-          mode: state.mode,
-          allow_full_access: state.allowFullAccess,
-          expert: state.expert || undefined,
-          skill: state.skill || undefined,
-          connector_ids: state.connectorIds,
-          attached_doc_ids: state.files.filter(function (f) { return f.id; }).map(function (f) { return f.id; })
-        })
-      });
-    }).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    }).then(function (d) {
-      if (d && d.reply) {
-        if (d.sources && d.sources.length) { state.sources = d.sources; renderSources(); }
-        return d.reply;
-      }
-      throw new Error('bad payload');
-    }).catch(function () { return localReply(text); });
+        body: JSON.stringify(payload)
+      }).then(function (r2) {
+        if (!r2.ok) throw new Error('HTTP ' + r2.status);
+        return r2.json();
+      }).then(function (d) {
+        if (d && d.reply) {
+          if (d.sources && d.sources.length) { state.sources = d.sources; renderSources(); }
+          return d.reply;
+        }
+        throw new Error('bad payload');
+      }).catch(function () { return localReply(text); });
+    });
 
     api.then(function (answer) {
-      thinking.querySelector('.msg-bubble').textContent = '';
-      return streamBubble(thinking, answer);
-    }).then(function () {
+      var bubble = thinking.querySelector('.msg-bubble');
+      if (answer) { bubble.textContent = answer; }
       state.busy = false;
       syncSend();
       $('#composerInputDock').focus();
+    }).catch(function () {
+      state.busy = false;
+      syncSend();
     });
+  }
+
+  /* ---------------- SSE 事件流（01 号票） ---------------- */
+  /* 契约（CONTEXT.md §三 event_stream）：帧格式 `event: <type>\ndata: <json>\n\n`，
+     事件型 lifecycle / tool / assistant / final。assistant 增量追加，tool 追加工具日志行。 */
+  function consumeStream(resp, bubbleEl) {
+    var bubble = bubbleEl.querySelector('.msg-bubble');
+    var reader = resp.body.getReader();
+    var decoder = new TextDecoder();
+    var buf = '';
+    var acc = '';
+    var finalReply = '';
+
+    function handleFrame(frame) {
+      if (!frame || !frame.trim()) return;
+      var ev = '', data = '';
+      frame.split('\n').forEach(function (line) {
+        if (line.indexOf('event: ') === 0) { ev = line.slice(7); }
+        else if (line.indexOf('data: ') === 0) { data = line.slice(6); }
+      });
+      var p = {};
+      try { p = JSON.parse(data); } catch (e) {}
+      if (ev === 'assistant') {
+        acc += (p.delta || '');
+        bubble.textContent = acc;
+      } else if (ev === 'tool') {
+        var line = document.createElement('div');
+        line.style.cssText = 'font-size:12px;color:#8a94a6;margin:2px 0;';
+        line.textContent = '🔧 ' + (p.tool || '工具') + ' · ' +
+          (p.event === 'call' ? '调用中…' : '已返回');
+        bubbleEl.appendChild(line);
+      } else if (ev === 'final') {
+        finalReply = p.reply || acc;
+        if (p.sources && p.sources.length) { state.sources = p.sources; renderSources(); }
+      }
+    }
+
+    function pump() {
+      return reader.read().then(function (res) {
+        if (res.done) {
+          if (buf) { handleFrame(buf); }
+          return finalReply || acc;
+        }
+        buf += decoder.decode(res.value, { stream: true });
+        var parts = buf.split('\n\n');
+        buf = parts.pop();
+        parts.forEach(handleFrame);
+        return pump();
+      });
+    }
+    return pump();
   }
 
   /* ---------------- 引用来源 ---------------- */
