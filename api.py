@@ -1790,6 +1790,19 @@ def models_chat(body: MChatIn, p: auth.Principal = Depends(need("chat"))):
                 "routed": {**rid, "reason": "已识别为工具指令，直接执行：" + _tname},
                 "auto": not body.model_id}
 
+    # ---- 技能清单注入（2026-09-30）：指定模型/自动路由此前完全看不到已装技能 ----
+    # 用户装完 find-skills 后继续对话，模型根本不知道有这个技能（阿长截图反馈「根本没修好」
+    # 的另一半根因）。与工作台 _agent_system 同源：skills_catalog 为单一可信源。
+    # 本链路无工具执行能力，故注入语强调「按技能工作流作答」而非调用工具。
+    try:
+        from core import skills_catalog as _sc
+        _sk = _sc.inject_text()
+        if _sk:
+            SYS += ("\n\n" + _sk + "\n（用户需求命中上述技能时，请按该技能的工作流与产出规范作答，"
+                    "并明确说明正在使用哪个技能。）")
+    except Exception:
+        pass
+
     r = model_hub.chat(mid, SYS, body.message, body.history, p.tenant_id, body.temperature)
     # 自动路由首选模型不可用时，回退到默认模型，保证回答不中断；指定模型失败不回退，避免违逆用户选择
     if (not r.get("ok")) and (not body.model_id):

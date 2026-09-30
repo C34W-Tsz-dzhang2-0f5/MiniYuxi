@@ -191,16 +191,38 @@ def _detect_tool(question: str):
     return None
 
 
+def _fmt_tool_text(name: str, r: dict) -> str:
+    """把工具返回结构格式化为人类可读文本（2026-09-30 阿长截图反馈：
+    skill.install 成功却把原始 dict 怼在对话里，看起来像报错）。"""
+    if "error" in r:
+        return "❌ 工具执行出错：" + str(r["error"])
+    res = r.get("result")
+    if name == "skill.install" and isinstance(res, dict):
+        if res.get("error"):
+            return "❌ " + str(res["error"])
+        lines = [f"✅ 技能安装成功：{res.get('name', '?')}（{res.get('count', '?')} 个文件）"]
+        if res.get("path"):
+            lines.append("安装位置：" + str(res["path"]))
+        if res.get("description"):
+            lines.append("技能说明：" + str(res["description"]).strip()[:200])
+        lines.append("下一步：不用做任何操作——直接继续对话，说出你的需求，"
+                     "命中该技能触发词时我会按它的工作流执行；也可到「系统管理 → 技能」查看。")
+        if res.get("note"):
+            lines.append("备注：" + str(res["note"]))
+        return "\n".join(lines)
+    if name == "skill.uninstall" and isinstance(res, dict):
+        if res.get("error"):
+            return "❌ " + str(res["error"])
+        return (f"✅ 技能已卸载：{res.get('name', '?')}"
+                + (f"（删除 {res.get('removed', '?')} 个文件）" if res.get("removed") is not None else ""))
+    return str(res) if res is not None else str(r)
+
+
 def _run_tool(tenant_id, name, args):
     """执行工具并返回统一结构。"""
     from . import tools_registry
     r = tools_registry.call_tool(name, args, tenant_id=tenant_id)
-    if "result" in r:
-        text = str(r["result"])
-    elif "error" in r:
-        text = "工具执行出错：" + str(r["error"])
-    else:
-        text = str(r)
+    text = _fmt_tool_text(name, r)
     return {"answer": f"【工具调用 · {name}】\n{text}", "citations": [], "mode": "tool",
             "tool": name, "tool_result": r}
 

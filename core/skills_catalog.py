@@ -224,10 +224,12 @@ def load_skill(name: str, skills_dir: str = None):
     return None
 
 
-def inject_text(limit: int = 8) -> str:
+def inject_text(limit: int = 48) -> str:
     """生成可注入的技能清单文本（作为 user message 段，不污染 system 主结构）。
 
     学 Hermes：技能清单作 user message 注入，保持 system prompt 主结构干净。
+    2026-09-30：默认 limit 8→48——本机已装 48 个技能，find-skills 按字母序排第 13，
+    只注入前 8 个时新装技能永远不可见（阿长截图反馈「装完没反应」的第三层根因）。
     """
     skills = list_skills()
     if not skills:

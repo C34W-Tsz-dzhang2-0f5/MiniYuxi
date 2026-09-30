@@ -25,6 +25,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core import rag  # noqa: E402
+from core import skills_catalog  # noqa: E402
 from core import skills_install as si  # noqa: E402
 
 
@@ -149,3 +150,26 @@ def test_no_git_zip_all_fail_reports_diagnosable(monkeypatch, tmp_path):
     msg = str(ei.value)
     assert "zip 兜底" in msg and "main/master" in msg and "下载失败" in msg, \
         "zip 兜底全失败时报错必须说明尝试范围与原因"
+
+
+def test_tool_result_formatted_not_raw_dict():
+    """🔴 回归（2026-09-30 阿长截图）：skill.install 成功却把原始 dict 怼进对话，
+    看起来像报错。必须格式化为人类可读文案（原始结构仍留在 tool_result 供程序用）。"""
+    r = {"name": "skill.install",
+         "result": {"ok": True, "name": "find-skills", "path": "X:\skills\find-skills",
+                    "description": "Helps users discover skills", "count": 1,
+                    "note": "已安装并刷新技能目录"}}
+    text = rag._fmt_tool_text("skill.install", r)
+    assert "✅" in text and "技能安装成功" in text and "find-skills" in text
+    assert "{'ok'" not in text and "'ok': True" not in text, "不得把原始 dict 暴露给用户"
+    err = rag._fmt_tool_text("skill.install", {"error": "技能安装失败：boom"})
+    assert "❌" in err and "boom" in err
+
+
+def test_inject_text_covers_beyond_first_8_skills():
+    """🔴 回归（2026-09-30）：inject_text 默认 limit=8，本机已装 48 个技能时
+    新装的技能（字母序第 13）永远不进提示词，用户感知「装完没反应」。默认值必须 ≥48。"""
+    import inspect
+    sig = inspect.signature(skills_catalog.inject_text)
+    assert sig.parameters["limit"].default >= 48, \
+        "inject_text 默认 limit 过小，新装技能会被截掉"
