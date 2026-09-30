@@ -1666,12 +1666,17 @@
 
   function renderModelCenter(cat) {
     var provs = cat.providers || [], models = cat.models || [], strs = cat.strategies || {}, tts = cat.task_types || {};
+    var provById = {};
+    (provs || []).forEach(function (p) { provById[p.id] = p; });
     var modelHtml = models.map(function (m) {
       var cls = [];
       if (state.singleModelId === m.id) cls.push('on');
       if (state.compareIds.indexOf(m.id) >= 0) cls.push('cmp');
-      cls.push(m.available ? 'ready' : 'off');
+      var pv = provById[m.provider];
+      var noKey = pv && !pv.configured && pv.id !== 'offline';
+      if (noKey) cls.push('off'); else cls.push(m.available ? 'ready' : 'off');
       var tag = (m.caps || []).map(function (c) { return '<span class="mx-cap">' + esc(c) + '</span>'; }).join('');
+      if (noKey) tag += '<span class="mx-keytag">未配置 Key</span>';
       return '<div class="mx-card ' + cls.join(' ') + '" data-id="' + esc(m.id) + '">' +
         '<div class="mx-card__top"><b>' + esc(m.name || m.id) + '</b>' +
         (m.available ? '<i class="mx-dot ok"></i>' : '<i class="mx-dot no"></i>') + '</div>' +
@@ -1690,10 +1695,18 @@
         '<b>' + esc(p.name) + '</b>' +
         '<span>' + (p.configured ? ('就绪 ' + p.models_ready + '/' + p.models_total) : '未配置 Key · 点击配置') + '</span></div>';
     }).join('');
+    // 未配置 Key 的供应商：置顶醒目提示（排除离线兜底）
+    var unconf = provs.filter(function (p) { return !p.configured && p.id !== 'offline'; });
+    var warnHtml = unconf.length
+      ? '<div class="mx-warn"><b>⚠ ' + unconf.length + ' 家供应商未配置 Key</b>：' +
+        esc(unconf.map(function (p) { return p.name; }).join('、')) +
+        '。点下方「供应商状态」卡片，或直接点该供应商的任一模型，即可弹出 Key 填写窗。</div>'
+      : '';
 
     $('#fmBody').innerHTML =
       '<div class="mx-wrap">' +
-        '<div class="mx-block"><div class="mx-block__h">供应商状态</div><div class="mx-provs">' + provHtml + '</div></div>' +
+        warnHtml +
+        '<div class="mx-block"><div class="mx-block__h">供应商状态（点击卡片填写 API Key）</div><div class="mx-provs">' + provHtml + '</div></div>' +
         '<div class="mx-block"><div class="mx-block__h">调度策略（自动路由 / 对比合并用）</div><div class="mx-strats">' + stratHtml + '</div></div>' +
         '<div class="mx-block"><div class="mx-block__h">任务类型画像（自动路由识别依据）</div><div class="mx-tts">' + ttHtml + '</div></div>' +
         '<div class="mx-block"><div class="mx-block__h">模型目录（单击=选「指定模型」；Ctrl/⌘ 点击=加入「对比」）</div>' +
@@ -1713,6 +1726,17 @@
     $$('#fmBody .mx-card').forEach(function (c) {
       c.addEventListener('click', function (e) {
         var id = c.dataset.id;
+        var m = (cat.models || []).filter(function (x) { return x.id === id; })[0] || {};
+        var pv = provById[m.provider];
+        // 未配置 Key 的模型：点击不进入选择，直接弹出该供应商的 Key 填写窗
+        if (pv && !pv.configured && pv.id !== 'offline') {
+          state.singleModelId = id;
+          state.modelMode = 'single';
+          saveMX();
+          toast('「' + pv.name + '」还没填 API Key，填写并保存即可启用');
+          openProviderKeyModal(pv);
+          return;
+        }
         if (e.metaKey || e.ctrlKey) {
           var idx = state.compareIds.indexOf(id);
           if (idx >= 0) { state.compareIds.splice(idx, 1); c.classList.remove('cmp'); }

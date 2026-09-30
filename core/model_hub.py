@@ -214,7 +214,37 @@ def set_provider(provider_id: str, api_key: str = "", base_url: str = "", enable
         (provider_id, api_key, base_url, 1 if enabled else 0),
     )
     c.commit()
+    _sync_to_router(provider_id, api_key, base_url, enabled)
     return provider_id
+
+
+def _sync_to_router(provider_id: str, api_key: str, base_url: str, enabled: bool):
+    """把多模型中心配置的 Key 同步注册进 provider_router（llm_providers 表），
+    让工作台 Agent 模式（走 provider_router 故障转移链）同样用上这份 Key。
+    幂等：固定 id = hub:<provider_id>；无 Key 或无模型不注册。"""
+    p = _PROV.get(provider_id) or {}
+    if provider_id in ("offline", "custom") or not p:
+        return
+    base = (base_url or "").strip() or p.get("base_url", "")
+    if not api_key or not base:
+        return
+    m = next((x for x in MODELS if x["provider"] == provider_id), None)
+    if not m:
+        return
+    try:
+        from core import provider_router
+        provider_router.register_provider({
+            "id": "hub:" + provider_id,
+            "name": (p.get("name") or provider_id),
+            "kind": "openai",
+            "base_url": base,
+            "api_key": api_key,
+            "model": m["model"],
+            "priority": 100,   # 排在系统管理面板手工配置的供应商之后，不抢占故障转移链
+            "enabled": bool(enabled),
+        })
+    except Exception:
+        pass  # 同步失败不影响多模型中心本身（hub 仍可用）
 
 
 def catalog() -> dict:

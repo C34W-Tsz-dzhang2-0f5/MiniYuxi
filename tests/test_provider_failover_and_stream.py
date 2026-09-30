@@ -45,16 +45,27 @@ class TestProviderFailover(unittest.TestCase):
         from core import db
         provider_router.init()          # 建 llm_providers / kv_store 表
         self.conn = db.connect()
-        self.conn = db.connect()
-        # 清空注册表，保证每个用例从「空表」起算（不污染真实 data/miniyuxi.db 的
-        # 业务数据：这里只删 provider 行，且用例内自行注册需要的行）。
+        # 🔴 测试隔离：本类直接连真实 data/miniyuxi.db。先快照 llm_providers，
+        # 用例从「空表」起算，tearDown 原样恢复 —— 不能把用户已配置的供应商 Key 清掉
+        #（2026-09-30 踩坑：tearDown 直接 DELETE 全表，把多模型中心同步的 hub:* 条目抹了）。
+        self._snap = [dict(r) for r in
+                      self.conn.execute("SELECT * FROM llm_providers").fetchall()]
+        self._snap_active = provider_router.get_active(self.conn)
         self.conn.execute("DELETE FROM llm_providers")
         self.conn.commit()
 
     def tearDown(self):
         try:
             self.conn.execute("DELETE FROM llm_providers")
+            for row in self._snap:
+                cols = ",".join(row.keys())
+                ph = ",".join("?" for _ in row)
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO llm_providers(%s) VALUES(%s)" % (cols, ph),
+                    tuple(row.values()))
             self.conn.execute("DELETE FROM kv_store WHERE key='active_provider'")
+            if self._snap_active:
+                provider_router.set_active(self._snap_active, self.conn)
             self.conn.commit()
         except Exception:
             pass

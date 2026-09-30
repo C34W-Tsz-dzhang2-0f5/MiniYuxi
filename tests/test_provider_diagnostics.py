@@ -184,3 +184,17 @@ def test_health_offline_when_no_key(monkeypatch):
     d = api.health()
     assert d["modes"]["llm"] == "offline-fallback"
     assert d["llm_probe"] is None, "没配 Key 时不该白跑一次探活"
+
+
+def test_health_probe_passes_string_prompt_not_messages_list():
+    """🔴 回归：health 探活曾把 messages 列表当 prompt 传给 provider_router.chat，
+    组出的请求上游 400，探活永远 all_providers_failed（误导排障）。签名必须是
+    (system: str, prompt: str)。"""
+    import inspect
+
+    import api
+    src = inspect.getsource(api.health)
+    assert '[{"role"' not in src and '[{\'role\'' not in src, \
+        "health 探活不得把 messages 列表传给 provider_router.chat(system, prompt)"
+    assert '"ping", "ping"' in src or "'ping', 'ping'" in src, \
+        "探活调用必须是两个字符串参数"

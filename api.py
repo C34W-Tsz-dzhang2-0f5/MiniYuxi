@@ -209,7 +209,7 @@ def health():
     if config.llm_enabled():
         try:
             r = provider_router.chat(
-                "ping", [{"role": "user", "content": "ping"}], tenant_id="default")
+                "ping", "ping", tenant_id="default")  # 注意签名是 (system, prompt) 字符串
             if not r.get("ok"):
                 llm_state = "degraded"
                 llm_probe = r.get("err") or "unknown"
