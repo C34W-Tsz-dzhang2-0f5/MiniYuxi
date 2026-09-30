@@ -28,11 +28,14 @@ DEFAULT_SYSTEM = "你是 MiniYuxi，一个企业级 HR/法务垂直 Agent。"
 class AgentSession:
     """单个 agent 会话：持有累积对话，支撑跨请求长会话保活。"""
 
-    def __init__(self, session_id, tenant_id, thread_id=None, system=None):
+    def __init__(self, session_id, tenant_id, thread_id=None, system=None,
+                 allowed_toolsets=None):
         self.session_id = session_id
         self.tenant_id = tenant_id
         self.thread_id = thread_id  # 预留：将来映射到持久化对话线程
         self.system = system or DEFAULT_SYSTEM
+        # 最小权限：按 toolset 限制本会话可见工具（None = 全量，向后兼容）
+        self.allowed_toolsets = allowed_toolsets
         self.messages = []          # 累积对话（长会话保活）
         self.created_at = time.time()
         self.last_active = time.time()
@@ -41,6 +44,10 @@ class AgentSession:
         self.error = None
         self._future = None
         self._cancel_requested = False
+
+    def is_cancelled(self) -> bool:
+        """供 agent_loop 在每个工具边界轮询，实现协作式中断。"""
+        return bool(self._cancel_requested)
 
     def submit(self, user_prompt):
         """异步执行一轮（线程池），返回 Future；同一 session 串行（不并发两轮）。"""
@@ -55,11 +62,19 @@ class AgentSession:
         self.last_active = time.time()
         try:
             res = agent_loop.run(self.system, user_prompt,
-                                 history=self.messages, tenant_id=self.tenant_id)
+                                 history=self.messages, tenant_id=self.tenant_id,
+                                 allowed_toolsets=self.allowed_toolsets,
+                                 cancel_check=self.is_cancelled)
             if res is None:
                 self.status = "error"
                 self.error = "offline_or_gateway_failed"
                 return {"ok": False, "reason": "offline_or_gateway_failed"}
+            # 被取消：保留会话可再次 submit，不当成错误
+            if res.get("cancelled"):
+                self.status = "cancelled"
+                self.last_result = res
+                self.last_active = time.time()
+                return {"ok": False, "reason": "cancelled", **res}
             # 累积历史（长会话保活）；agent_loop 内部 tool 消息不跨轮保留（高层 user/assistant 足够）
             self.messages.append({"role": "user", "content": user_prompt})
             self.messages.append({"role": "assistant", "content": res.get("answer", "")})
@@ -73,7 +88,8 @@ class AgentSession:
             return {"ok": False, "error": str(e)}
 
     def cancel(self):
-        """请求取消（协作式：运行中无法强制中断同步 loop，仅标记）。"""
+        """请求取消。运行中：置协作式中断标志，agent_loop 在下个工具边界安全退出；
+        非运行中：直接置 cancelled 终态。"""
         self._cancel_requested = True
         if self.status != "running":
             self.status = "cancelled"
@@ -96,11 +112,17 @@ class AgentManager:
     """进程级 agent 运行时管理器（单例，按 session 管理长会话 + 并发）。"""
 
     @staticmethod
-    def create(session_id, tenant_id, thread_id=None, system=None):
+    def create(session_id, tenant_id, thread_id=None, system=None,
+               allowed_toolsets=None):
         with _lock:
             if session_id in _sessions:
-                return _sessions[session_id]
-            s = AgentSession(session_id, tenant_id, thread_id, system)
+                s = _sessions[session_id]
+                # 已存在会话：仅在显式传入时更新工具集（便于运行时收权）
+                if allowed_toolsets is not None:
+                    s.allowed_toolsets = allowed_toolsets
+                return s
+            s = AgentSession(session_id, tenant_id, thread_id, system,
+                             allowed_toolsets=allowed_toolsets)
             _sessions[session_id] = s
             return s
 

@@ -457,6 +457,8 @@ class AgentSessionIn(BaseModel):
     session_id: str
     system: str = ""
     thread_id: str = ""
+    # 最小权限：限定本会话可见的工具集（None=全量）。多租户隔离用。
+    allowed_toolsets: list | None = None
 
 
 class AgentSubmitIn(BaseModel):
@@ -475,6 +477,7 @@ def agent_session_create(body: AgentSessionIn, p: auth.Principal = Depends(need(
     s = agent_runtime.AgentManager.create(
         body.session_id, p.tenant_id,
         thread_id=body.thread_id or None, system=body.system or None,
+        allowed_toolsets=body.allowed_toolsets,
     )
     return {"ok": True, **s.to_dict()}
 

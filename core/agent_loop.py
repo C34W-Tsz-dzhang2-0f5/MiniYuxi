@@ -49,25 +49,80 @@ def _emit(emit, etype: str, payload: dict) -> None:
         pass
 
 
+# 粗粒度成本估算单价（单位：元 / 千 token）。网关未回传真实 cost 时兜底，
+# 目的是让 BudgetGuard.max_cost 闸门**真的能触发**，而非追求精确计费。
+# 精确账单以 core/usage.py 记录为准。
+_COST_PER_1K = {
+    "deepseek": (0.002, 0.008),
+    "doubao": (0.0008, 0.002),
+    "qwen": (0.002, 0.006),
+    "gpt": (0.015, 0.060),
+    "claude": (0.022, 0.110),
+}
+_DEFAULT_PRICE = (0.005, 0.020)
+
+
+def _estimate_cost(prompt_tokens: int, completion_tokens: int, model: str | None = None) -> float:
+    """按 token 数估算一次 LLM 调用成本（元）。估算失败返回 0.0，绝不影响主链路。"""
+    try:
+        name = (model or config.LLM_MODEL or "").lower()
+        pin, pout = _DEFAULT_PRICE
+        for key, prices in _COST_PER_1K.items():
+            if key in name:
+                pin, pout = prices
+                break
+        return round((prompt_tokens / 1000.0) * pin + (completion_tokens / 1000.0) * pout, 8)
+    except Exception:
+        return 0.0
+
+
 def run(system: str, user_prompt: str, history: list | None = None,
         tenant_id: str = None, memories: list | None = None, trace_id: str = None,
-        provider: str | None = None, model: str | None = None, emit=None) -> dict | None:
+        provider: str | None = None, model: str | None = None, emit=None,
+        allowed_toolsets: list | None = None,
+        cancel_check=None) -> dict | None:
     """执行自主循环。返回 {answer, mode, model, tool_calls_used, loop_trace, memories_used, trace_id}
     或 None（离线/网关失败，由 caller 退化）。
 
     企业级增强（对齐 docs/enterprise-boundary-desktop-web-20260929.md）：
     - ④ 可观测性：每次 LLM 调用 / 工具执行都挂 trace_id 结构化 span（observability）。
     - ⑤ 成本硬熔断：每步过 BudgetGuard（步数/超时/token/成本/租户预算/失控循环），熔断即终止并告警 SOC。
+
+    2026-09-30 加固（对应 docs/OpenClaw_Agent调度机制五阶段技术文档 §5.5）：
+    - allowed_toolsets：按 toolset 过滤暴露给模型的工具（多租户最小权限，默认 None=全量向后兼容）。
+    - cancel_check：可调用对象，返回 True 表示请求取消；每轮循环前检查，实现协作式中断。
+    - 审批卡识别：工具返回 status=="pending" 时**不再当普通结果喂回模型**，
+      改为回灌一条明确的「待人工审批」观察并终止本轮循环，避免模型误判已执行完。
     """
     if not config.llm_enabled():
         return None
+
+    # 多租户闸门（2026-09-30 接入）：此前 multitenant.enforce 全仓零调用，
+    # 配额闸门形同虚设。这里在入口做一次强制校验，拒绝时直接返回，
+    # 不产生任何 token 消耗，并写 SOC 链留痕。
+    if tenant_id:
+        try:
+            from . import multitenant
+            gate = multitenant.enforce(tenant_id, "agent_run")
+            if not gate.get("allow"):
+                _emit(emit, "lifecycle", {"phase": "blocked", "reason": gate.get("reason")})
+                return {
+                    "answer": "（已被多租户配额闸门拦截：%s）" % gate.get("reason"),
+                    "mode": "blocked", "model": model or config.LLM_MODEL,
+                    "tool_calls_used": [], "loop_trace": [],
+                    "memories_used": False, "trace_id": None,
+                    "blocked": True, "block_reason": gate.get("reason"),
+                }
+        except Exception:
+            # 闸门自身异常不得阻断主链路（fail-open，与 egress 策略一致由部署侧决定）
+            pass
 
     from . import observability, circuit_breaker, soc_audit
     tid = observability.start_trace(trace_id)
     guard = circuit_breaker.BudgetGuard(tenant_id=tenant_id)
     _emit(emit, "lifecycle", {"phase": "start", "trace_id": tid})
 
-    tools = _to_openai_tools()
+    tools = _to_openai_tools(allowed_toolsets)
     messages = []
     from . import memory_slim
     for h in memory_slim.slim_messages(history):
@@ -90,8 +145,25 @@ def run(system: str, user_prompt: str, history: list | None = None,
     last_assistant = ""
     circuit_open = False
     circuit_reason = None
+    # 审批挂起单：命中审批门时填充。无工具调用路径下必须已初始化，
+    # 否则末尾 if pending_approval 会抛 UnboundLocalError。
+    pending_approval = None
 
     for _ in range(MAX_LOOPS):
+        # 协作式中断：调用方（agent_runtime.AgentSession.cancel）置位后在此生效。
+        # 同步 loop 无法强制杀线程，只能在每个工具边界安全退出。
+        if cancel_check is not None:
+            try:
+                if cancel_check():
+                    _emit(emit, "lifecycle", {"phase": "cancelled", "trace_id": tid})
+                    return {
+                        "answer": "（已取消）", "mode": "agent",
+                        "model": model or config.LLM_MODEL, "tool_calls_used": used_tools,
+                        "loop_trace": loop_trace, "memories_used": bool(memories),
+                        "trace_id": tid, "cancelled": True,
+                    }
+            except Exception:
+                pass
         # 步级熔断检查（步数 / 超时 / token / 成本 / 租户预算）
         decision, reason = guard.check_step()
         if decision == "open":
@@ -106,7 +178,19 @@ def run(system: str, user_prompt: str, history: list | None = None,
             return None  # 网关失败（如限流）→ caller 退化
         u = res.get("usage")
         if u:
-            guard.record_tokens((u.get("prompt_tokens") or 0) + (u.get("completion_tokens") or 0))
+            pt = (u.get("prompt_tokens") or 0)
+            ct = (u.get("completion_tokens") or 0)
+            guard.record_tokens(pt + ct)
+            # 成本记账：原实现从不调用 record_cost，导致 BudgetGuard.max_cost
+            # 闸门（RUN_MAX_COST）恒不触发 —— 单次运行成本完全失控。
+            # 优先用网关回传的真实 cost；否则按 token 数 × 配置单价估算。
+            try:
+                cost = u.get("cost")
+                if cost is None:
+                    cost = _estimate_cost(pt, ct, model)
+                guard.record_cost(cost)
+            except Exception:
+                pass
         msg_content = res["text"]
         tool_calls = res["tool_calls"]
         last_assistant = msg_content or last_assistant
@@ -126,6 +210,7 @@ def run(system: str, user_prompt: str, history: list | None = None,
             break
 
         inner_break = False
+        pending_approval = None
         for tc in tool_calls:
             name, args = tc["name"], (tc["arguments"] or {})
             decision, reason = guard.check_step(action_key=name)  # 含失控循环检测
@@ -138,6 +223,24 @@ def run(system: str, user_prompt: str, history: list | None = None,
                 r = tools_registry.run_tool_governed(name, args, tenant_id=tenant_id, session_id=None)
                 if "error" in r:
                     tsp.set_status("error")
+            # 🔴 审批卡识别（2026-09-30 加固）：
+            # run_tool_governed 命中审批门时返回 {"status":"pending","approval_id":...}，
+            # 原实现走到最后的 json.dumps 兜底分支，把整份审批单当工具结果喂回模型，
+            # 模型会误判"工具已执行完"，导致 HITL 形同虚设。
+            # 这里显式识别：回灌明确的「待人工审批」观察并**结束本轮循环**。
+            if isinstance(r, dict) and r.get("status") == "pending":
+                aid = r.get("approval_id")
+                pending_approval = {"approval_id": aid, "tool": name, "args": args}
+                out = ("【待人工审批】工具「%s」因高危/需确认已被安全审批门挂起，尚未执行。"
+                       "审批单号 %s。请告知用户：需先在审批中心完成审批，"
+                       "审批通过后系统会自动续跑该动作。" % (name, aid))
+                _emit(emit, "tool", {"event": "pending", "tool": name, "approval_id": aid})
+                used_tools.append(name)
+                loop_trace.append({"tool": name, "args": args, "pending_approval": aid})
+                messages.append({"role": "tool", "tool_call_id": tc["id"], "name": name,
+                                 "content": out[:1600]})
+                inner_break = True
+                break
             if "result" in r:
                 out = str(r["result"])
             elif "content" in r:
@@ -151,6 +254,20 @@ def run(system: str, user_prompt: str, history: list | None = None,
             loop_trace.append({"tool": name, "args": args, "result": out[:600]})
             messages.append({"role": "tool", "tool_call_id": tc["id"], "name": name, "content": out[:1600]})
         if inner_break:
+            # 挂起在审批门：让模型基于"待审批"观察再生成一次最终答复（告知用户），
+            # 但**不得**继续执行后续工具调用。
+            if pending_approval is not None:
+                try:
+                    with observability.span("llm:pending_notice", kind="llm",
+                                            tenant_id=tenant_id) as psp:
+                        nres = gateway.chat_with_tools(system, messages, [],
+                                                       tenant_id=tenant_id,
+                                                       provider=provider, model=model)
+                    if nres.get("ok") and nres.get("text"):
+                        final_text = nres["text"]
+                        _emit(emit, "assistant", {"delta": nres["text"]})
+                except Exception:
+                    pass
             break
 
     if not final_text:
@@ -167,6 +284,9 @@ def run(system: str, user_prompt: str, history: list | None = None,
         "memories_used": bool(memories),
         "trace_id": tid,
     }
+    if pending_approval:
+        # 上层据此渲染「审批卡」UI；审批通过后带 approval_id 重跑触发 resume。
+        result["pending_approval"] = pending_approval
     if circuit_open:
         result["circuit_open"] = True
         result["circuit_reason"] = circuit_reason
