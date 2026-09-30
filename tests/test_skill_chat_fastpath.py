@@ -14,6 +14,7 @@
   3. git clone 直连失败后自动改走镜像（MINIYUXI_GIT_MIRROR，默认 ghfast.top）并成功；
   4. 直连+镜像都失败时，报错必须同时带两边信息（可诊断，不裸抛栈）。
 """
+import os
 import shutil
 import subprocess
 import sys
@@ -102,3 +103,49 @@ def test_clone_error_reports_both_attempts(monkeypatch, tmp_path):
     msg = str(ei.value)
     assert "直连" in msg and "ghfast.top" in msg and "boom" in msg, \
         "失败信息必须同时带直连与镜像两侧错误，便于诊断"
+
+
+# ------------------------------------------------ 4. 本机无 git → zip 兜底
+# 2026-09-30 阿长第二张截图：双击 bat 起的服务进程 PATH 里没有 git，
+# 报「本机未安装 git」。现在改为：找不到 git 时自动走 GitHub archive zip。
+
+def test_no_git_falls_back_to_zip(monkeypatch, tmp_path):
+    """🔴 核心回归：_find_git 找不到 git 时，必须改走 archive zip 而非直接失败。"""
+    urls = []
+
+    def fake_fetch(zip_url, stage):
+        urls.append(zip_url)
+        # 模拟 GitHub archive zip：带顶层目录 bar-main/
+        top = os.path.join(stage, "bar-main")
+        os.makedirs(top)
+        with open(os.path.join(top, "SKILL.md"), "w", encoding="utf-8") as f:
+            f.write("---\nname: mirror-demo\ndescription: 无git兜底\n---\n\n# body\n")
+
+    monkeypatch.delenv("MINIYUXI_GIT_MIRROR", raising=False)
+    monkeypatch.setattr(si, "_find_git", lambda: None)
+    monkeypatch.setattr(si, "_fetch_zip_into", fake_fetch)
+
+    skills_dir = tmp_path / "skills3"
+    res = si.install_skill("url", "https://github.com/foo/bar.git", skills_dir=str(skills_dir))
+    assert res["ok"] is True and res["name"] == "mirror-demo"
+    # 第一个候选必须是「镜像 + main 分支」的 archive zip
+    assert urls[0] == "https://ghfast.top/https://github.com/foo/bar/archive/refs/heads/main.zip", \
+        "无 git 时首个兜底候选应为 ghfast.top 镜像的 main.zip"
+    # archive zip 的顶层目录 bar-main/ 必须被塌缩掉
+    assert (skills_dir / "mirror-demo" / "SKILL.md").is_file()
+
+
+def test_no_git_zip_all_fail_reports_diagnosable(monkeypatch, tmp_path):
+    def fake_fetch(zip_url, stage):
+        raise si.SkillInstallError("下载失败：超时 " + zip_url[-20:])
+
+    monkeypatch.delenv("MINIYUXI_GIT_MIRROR", raising=False)
+    monkeypatch.setattr(si, "_find_git", lambda: None)
+    monkeypatch.setattr(si, "_fetch_zip_into", fake_fetch)
+
+    with pytest.raises(si.SkillInstallError) as ei:
+        si.install_skill("url", "https://github.com/foo/bar.git",
+                         skills_dir=str(tmp_path / "skills4"))
+    msg = str(ei.value)
+    assert "zip 兜底" in msg and "main/master" in msg and "下载失败" in msg, \
+        "zip 兜底全失败时报错必须说明尝试范围与原因"

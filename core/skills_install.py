@@ -181,6 +181,75 @@ def normalize_url(value):
     return v
 
 
+def _find_git():
+    """找到可用的 git 可执行文件**绝对路径**；找不到返回 None。
+
+    背景（2026-09-30 阿长实测）：git 装在 WorkBuddy 便携目录，双击 .bat
+    启动的服务进程 PATH 里没有它，`subprocess.run(["git", ...])` 直接
+    FileNotFoundError → 报「本机未安装 git」。这里先查 PATH，再探常见
+    安装位（含 WorkBuddy 便携 git），返回绝对路径避免再依赖 PATH。
+    """
+    exe = shutil.which("git")
+    if exe:
+        return exe
+    pats = [
+        r"C:\Program Files\Git\cmd\git.exe",
+        r"C:\Program Files\Git\bin\git.exe",
+        r"C:\Program Files (x86)\Git\cmd\git.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Git\cmd\git.exe"),
+        os.path.expanduser(r"~\.workbuddy\binaries\PortableGit\versions\*\mingw64\bin\git.exe"),
+        os.path.expanduser(r"~\scoop\apps\git\current\cmd\git.exe"),
+    ]
+    for p in pats:
+        hits = sorted(glob.glob(p))
+        if hits:
+            return hits[-1]
+    return None
+
+
+def _fetch_zip_into(zip_url, stage):
+    """下载 zip 并安全解压到 stage（逐条防穿越，过 security.validate_within_dir）。"""
+    from . import security
+    try:
+        req = urllib.request.Request(zip_url, headers={"User-Agent": "miniyuxi"})
+        data = urllib.request.urlopen(req, timeout=60).read()
+    except urllib.error.URLError as e:
+        raise SkillInstallError("下载失败：" + str(e)[:200])
+    if data[:2] != b"PK":
+        raise SkillInstallError("链接内容不是 zip（缺少 PK 头）")
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
+        for member in zf.namelist():
+            dest = os.path.normpath(os.path.join(stage, member))
+            if not security.validate_within_dir(dest, stage):
+                raise SkillInstallError("zip 内含越界路径，已拒绝")
+            if member.endswith("/"):
+                os.makedirs(dest, exist_ok=True)
+            else:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(dest, "wb") as f:
+                    f.write(zf.read(member))
+        zf.close()
+    except SkillInstallError:
+        raise
+    except Exception as e:
+        raise SkillInstallError("zip 解压失败：" + str(e)[:200])
+
+
+def _flatten_single_top(stage):
+    """GitHub archive zip 解压后必有顶层目录（如 repo-main/）。
+
+    若 stage 只含这一个顶层目录，把其内容上提到 stage 根，与 git clone
+    的目录布局对齐（否则集合仓库的子技能定位会多一层仓库前缀）。
+    """
+    entries = os.listdir(stage)
+    if len(entries) == 1 and os.path.isdir(os.path.join(stage, entries[0])):
+        top = os.path.join(stage, entries[0])
+        for nm in os.listdir(top):
+            os.replace(os.path.join(top, nm), os.path.join(stage, nm))
+        os.rmdir(top)
+
+
 # ---------------- 安装 ----------------
 def install_skill(method, value, name="", skills_dir=None, select=""):
     """安装技能。成功返回 {ok,name,path,description,count}，失败抛 SkillInstallError。
@@ -234,54 +303,58 @@ def install_skill(method, value, name="", skills_dir=None, select=""):
             if security.hardline_block(url) or security.is_dangerous_command(url):
                 raise SkillInstallError("链接命中安全黑名单，已拒绝")
             if url.lower().endswith(".git"):
-                def _clone(u):
-                    subprocess.run(["git", "clone", "--depth", "1", u, stage],
-                                   timeout=180, capture_output=True, check=True)
-                try:
-                    _clone(url)
-                except FileNotFoundError:
-                    raise SkillInstallError("本机未安装 git，无法克隆仓库")
-                except subprocess.CalledProcessError as e:
-                    err1 = (e.stderr or b"").decode(errors="ignore")[:200]
-                    # 国内网络兜底：GitHub 直连常超时，自动改走镜像再试一次
-                    #（镜像前缀可用环境变量 MINIYUXI_GIT_MIRROR 覆盖，留空则不重试）
-                    mirror = (os.getenv("MINIYUXI_GIT_MIRROR") or "https://ghfast.top/").strip()
-                    murl = (mirror.rstrip("/") + "/" + url) if mirror else None
-                    if not murl:
-                        raise SkillInstallError("git clone 失败：" + err1)
+                git_exe = _find_git()
+                cloned = False
+                if git_exe:
+                    def _clone(u):
+                        subprocess.run([git_exe, "clone", "--depth", "1", u, stage],
+                                       timeout=180, capture_output=True, check=True)
                     try:
-                        _clone(murl)
-                    except subprocess.CalledProcessError as e2:
-                        err2 = (e2.stderr or b"").decode(errors="ignore")[:120]
+                        _clone(url)
+                        cloned = True
+                    except FileNotFoundError:
+                        pass   # git 路径意外失效 → 落 zip 兜底，不直接失败
+                    except subprocess.CalledProcessError as e:
+                        err1 = (e.stderr or b"").decode(errors="ignore")[:200]
+                        # 国内网络兜底：GitHub 直连常超时，自动改走镜像再试一次
+                        #（镜像前缀可用环境变量 MINIYUXI_GIT_MIRROR 覆盖，留空则不重试）
+                        mirror = (os.getenv("MINIYUXI_GIT_MIRROR") or "https://ghfast.top/").strip()
+                        murl = (mirror.rstrip("/") + "/" + url) if mirror else None
+                        if not murl:
+                            raise SkillInstallError("git clone 失败：" + err1)
+                        try:
+                            _clone(murl)
+                            cloned = True
+                        except subprocess.CalledProcessError as e2:
+                            err2 = (e2.stderr or b"").decode(errors="ignore")[:120]
+                            raise SkillInstallError(
+                                "git clone 失败（直连与镜像 %s 均试过）：%s | 镜像错误：%s"
+                                % (mirror, err1, err2))
+                if not cloned:
+                    # 本机没有 git（PATH 与常见安装位都没找到）：改走 GitHub
+                    # archive zip 下载兜底（镜像优先），不再报「未安装 git」就失败。
+                    repo = url[:-4] if url.lower().endswith(".git") else url
+                    mirror = (os.getenv("MINIYUXI_GIT_MIRROR") or "https://ghfast.top/").strip().rstrip("/")
+                    heads = ([mirror + "/" + repo, repo] if mirror else [repo])
+                    cands = [h + "/archive/refs/heads/" + br + ".zip"
+                             for br in ("main", "master") for h in heads]
+                    last = ""
+                    for cu in cands:
+                        try:
+                            _fetch_zip_into(cu, stage)
+                            _flatten_single_top(stage)
+                            break
+                        except SkillInstallError as e:
+                            last = str(e)
+                            shutil.rmtree(stage, ignore_errors=True)  # 清半截再试下一候选
+                            os.makedirs(stage, exist_ok=True)
+                    else:
                         raise SkillInstallError(
-                            "git clone 失败（直连与镜像 %s 均试过）：%s | 镜像错误：%s"
-                            % (mirror, err1, err2))
+                            "本机未找到 git，zip 兜底下载也失败（main/master、镜像+直连均试过）：%s"
+                            % last)
             else:
-                # zip 下载 + 安全解压（逐条防穿越，过 security.validate_within_dir）
-                try:
-                    req = urllib.request.Request(url, headers={"User-Agent": "miniyuxi"})
-                    data = urllib.request.urlopen(req, timeout=60).read()
-                except urllib.error.URLError as e:
-                    raise SkillInstallError("下载失败：" + str(e)[:200])
-                if data[:2] != b"PK":
-                    raise SkillInstallError("链接内容不是 zip（缺少 PK 头）")
-                try:
-                    zf = zipfile.ZipFile(io.BytesIO(data))
-                    for member in zf.namelist():
-                        dest = os.path.normpath(os.path.join(stage, member))
-                        if not security.validate_within_dir(dest, stage):
-                            raise SkillInstallError("zip 内含越界路径，已拒绝")
-                        if member.endswith("/"):
-                            os.makedirs(dest, exist_ok=True)
-                        else:
-                            os.makedirs(os.path.dirname(dest), exist_ok=True)
-                            with open(dest, "wb") as f:
-                                f.write(zf.read(member))
-                    zf.close()
-                except SkillInstallError:
-                    raise
-                except Exception as e:
-                    raise SkillInstallError("zip 解压失败：" + str(e)[:200])
+                # zip 直链下载 + 安全解压
+                _fetch_zip_into(url, stage)
             base = os.path.basename(url.rstrip("/").split("?")[0])
             if base.lower().endswith(".git"):
                 base = base[:-4]
