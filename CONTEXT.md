@@ -38,14 +38,19 @@
 | **mcp_ruoyi_adapter** | `tools/mcp_ruoyi_adapter.py` | RuoYi 业务集成适配器（B1–B4） |
 | **eval_harness / 评测 harness** | `core/eval_harness.py` | YAML 任务 + Pass@1/k + LLM-as-Judge |
 | **agent_runtime / 运行时** | `core/agent_runtime.py` | 进程级 Agent 运行时管理 |
+| **agent_loop / 智能体循环** | `core/agent_loop.py` | ReAct 反思循环内核（`run()`）；一切工具执行的唯一入口 |
+| **event_stream / 事件流** | `core/agent_loop.py` emit → SSE | Agent 循环标准事件（`lifecycle`/`tool`/`assistant`）流式推送前端 |
+| **lane / 会话通道** | `core/agent_runtime.py` | **同会话串行**（`status=="running"` 拒并发）· 跨会话并行；子 Agent 用独立 lane |
+| **swarm / 子 Agent 集群** | `core/subagent.py` | 主 Agent 拆子任务 → 隔离子会话并行 → Fan-in 汇总（`maxSpawnDepth=1`） |
+| **heartbeat / 心跳** | （规划中） | 无用户消息时定时自主复盘/自检/推进 |
 
 ## 四、企业级八要素术语（enterprise-agent-scaffolding）
 
 1. **多租户隔离** (Tenant Isolation)
 2. **身份与权限 / 最小权限** (IAM / Least Privilege)
 3. **审计日志** (Audit Logging) — 落地为 **SOC 哈希链**
-4. **可观测性 / Tracing** (Observability) — 当前**缺失**
-5. **成本控制 / 熔断** (Cost Governance / Circuit Breaker)
+4. **可观测性 / Tracing** (Observability) — 落地为 `core/observability.py`（`start_trace`/`span`/`get_metrics`），2026-09-29 达标
+5. **成本控制 / 熔断** (Cost Governance / Circuit Breaker) — 落地为 `core/circuit_breaker.py`（`BudgetGuard`），2026-09-29 达标
 6. **人工审批 / HITL** (Human-in-the-loop)
 7. **行为评测集** (Eval Suite)
 8. **CI/CD 与灰度** (Deployment)
@@ -57,6 +62,8 @@
 - **不可逆动作独立人审**：发消息/删数据/转账等走 `approval` 卡，**禁止模型自审自己是否安全**。
 - **桌面版默认单租户**；写「多租户隔离」相关代码前先确认是针对网页版对外部署形态。
 - **契约先行**：技能字段契约看 `skills/SKILL_CONTRACT.md`；版本号唯一来源 `core/version.py`。
+- **事件流单一来源**：前端一切「思考/工具调用」展示**只**读 `event_stream`（`lifecycle`/`tool`/`assistant` 三型），禁止前端自己拼装过程态。
+- **工具执行唯一入口**：所有工具调用必须经 `agent_loop.run()` → `tools_registry.run_tool_governed()`（过 egress/HITL/熔断/审计），**禁止**旁路直调。
 
 ## 六、外部概念（引用时保持原名）
 
