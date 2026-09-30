@@ -1248,7 +1248,216 @@
     }).catch(function (e) { msg.textContent = '保存失败：' + (e.message || e); msg.style.color = '#d33'; });
   }
 
-  /* ---------------- 系统管理弹窗（B 方案：自助改密 + 用户管理）---------------- */
+  /* ---------------- 模型供应商管理（自由配置 Key，OpenClaw 同思路）----------------
+     为什么必须做成界面而不是只靠 bat：Key 硬编码在 start_miniyuxi.bat 里，
+     换一次要改文件 + 改错一个字符就 401；而 401 的表现是「问答静默降级成本地摘录」，
+     用户完全看不出是自己 Key 过期了。这里提供 增/改/删/设默认/保存前验活。 */
+  var PROVIDER_PRESETS = {
+    deepseek: { name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+    siliconflow: { name: 'SiliconFlow', base_url: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen2.5-72B-Instruct' },
+    dashscope: { name: '通义千问（DashScope）', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
+    openai: { name: 'OpenAI', base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+    moonshot: { name: 'Moonshot', base_url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+    zhipu: { name: '智谱 GLM', base_url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' }
+  };
+
+  function providerRowHtml(p, activeId) {
+    var isActive = p.id === activeId;
+    return '<tr data-pid="' + esc(p.id) + '">' +
+      '<td>' + esc(p.name || p.id) + (isActive ? ' <span class="fm-tag">默认</span>' : '') + '</td>' +
+      '<td><input class="fm-input" data-f="name" value="' + esc(p.name || p.id) + '"></td>' +
+      '<td><input class="fm-input" data-f="base_url" value="' + esc(p.base_url) + '"></td>' +
+      '<td><input class="fm-input" data-f="model" value="' + esc(p.model) + '"></td>' +
+      '<td><input class="fm-input" data-f="api_key" type="password" placeholder="' +
+        (p.has_key ? '已保存（留空不改）' : 'sk-…') + '"></td>' +
+      '<td>' +
+        '<button class="fm-btn sm" data-act="test">验活</button> ' +
+        '<button class="fm-btn sm" data-act="save">保存</button> ' +
+        (isActive ? '' : '<button class="fm-btn sm" data-act="active">设为默认</button> ') +
+        '<button class="fm-btn sm danger" data-act="del">删除</button>' +
+        '<div class="fm-hint" data-role="msg"></div>' +
+      '</td></tr>';
+  }
+
+  function renderProviderRows(list, activeId) {
+    var box = $('#amProviders');
+    if (!box) return;
+    if (!list.length) {
+      box.innerHTML = '<div class="fm-empty">尚未配置任何供应商。' +
+        '在下方表单添加，或检查启动脚本 start_miniyuxi.bat 的 LLM_API_KEY 是否有效。</div>';
+      return;
+    }
+    box.innerHTML = '<table class="fm-table"><tr><th>供应商</th><th>名称</th><th>Base URL</th>' +
+      '<th>模型</th><th>API Key</th><th>操作</th></tr>' + list.map(function (p) {
+        return providerRowHtml(p, activeId);
+      }).join('') + '</table>';
+  }
+
+  function loadProviders() {
+    var box = $('#amProviders');
+    if (!box) return;
+    box.innerHTML = '加载中…';
+    wbFetch('/api/gateway/providers')
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (d) {
+        // 脱敏：api_key 绝不下发完整值，只给 has_key
+        var list = (d.providers || []).map(function (p) {
+          return Object.assign({}, p, { has_key: !!p.api_key, api_key: '' });
+        });
+        AM_PROVIDERS = list;
+        renderProviderRows(list, d.active);
+      })
+      .catch(function (e) { box.innerHTML = '<div class="fm-empty">加载失败：' + esc(e.message || e) + '</div>'; });
+  }
+
+  function providerFieldsFromRow(tr) {
+    var o = {};
+    tr.querySelectorAll('[data-f]').forEach(function (el) { o[el.getAttribute('data-f')] = el.value.trim(); });
+    return o;
+  }
+
+  function bindProviderRow(tr) {
+    var pid = tr.getAttribute('data-pid');
+    var msgBox = tr.querySelector('[data-role="msg"]');
+    function say(text, ok) {
+      if (!msgBox) return;
+      msgBox.textContent = text;
+      msgBox.style.color = ok ? '#1a7f37' : '#d33';
+    }
+    function collect() {
+      var f = providerFieldsFromRow(tr);
+      return { id: pid, name: f.name || pid, kind: 'openai', base_url: f.base_url,
+               api_key: f.api_key, model: f.model, priority: 0, enabled: true };
+    }
+    tr.addEventListener('click', function (e) {
+      var act = e.target.getAttribute && e.target.getAttribute('data-act');
+      if (!act) return;
+      e.preventDefault();
+      if (act === 'test') {
+        say('验活中…', true);
+        wbFetch('/api/gateway/providers/test', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(collect())
+        })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (o) {
+            if (o.ok && o.j.ok) { say('✓ ' + (o.j.hint || '连通正常'), true); }
+            else { say('✗ ' + (o.j.err || '') + ' · ' + (o.j.hint || '验活失败'), false); }
+          })
+          .catch(function (err) { say('✗ 验活请求失败：' + (err.message || err), false); });
+        return;
+      }
+      if (act === 'save') {
+        say('保存中…', true);
+        wbFetch('/api/gateway/providers', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(collect())
+        })
+          .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then(function () { say('✓ 已保存（Key 已存库，重启仍生效）', true); loadProviders(); })
+          .catch(function (err) { say('✗ 保存失败：' + (err.message || err), false); });
+        return;
+      }
+      if (act === 'active') {
+        wbFetch('/api/gateway/active', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider_id: pid })
+        })
+          .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then(function () { toast('已设为默认供应商'); loadProviders(); })
+          .catch(function (err) { say('✗ 设置失败：' + (err.message || err), false); });
+        return;
+      }
+      if (act === 'del') {
+        if (!window.confirm('确认删除供应商「' + pid + '」？')) return;
+        wbFetch('/api/gateway/providers/' + encodeURIComponent(pid), { method: 'DELETE' })
+          .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then(function () { toast('已删除'); loadProviders(); })
+          .catch(function (err) { say('✗ 删除失败：' + (err.message || err), false); });
+      }
+    });
+  }
+
+  var AM_PROVIDERS = [];
+
+  function renderProviderForm() {
+    var box = $('#amProvForm');
+    if (!box) return;
+    var opts = Object.keys(PROVIDER_PRESETS).map(function (k) {
+      return '<option value="' + k + '">' + esc(PROVIDER_PRESETS[k].name) + '</option>';
+    }).join('');
+    box.innerHTML =
+      '<div class="fm-row"><label>预设</label><select class="fm-input" id="ppPreset">' + opts + '</select></div>' +
+      '<div class="fm-row"><label>ID</label><input class="fm-input" id="ppId" placeholder="deepseek"></div>' +
+      '<div class="fm-row"><label>名称</label><input class="fm-input" id="ppName" placeholder="DeepSeek"></div>' +
+      '<div class="fm-row"><label>Base URL</label><input class="fm-input" id="ppBase" placeholder="https://api.deepseek.com/v1"></div>' +
+      '<div class="fm-row"><label>模型</label><input class="fm-input" id="ppModel" placeholder="deepseek-chat"></div>' +
+      '<div class="fm-row"><label>API Key</label><input class="fm-input" id="ppKey" type="password" placeholder="sk-…"></div>' +
+      '<div class="fm-row"><button class="fm-btn" id="ppTest">先验活</button>' +
+      '<button class="fm-btn" id="ppAdd">验活并添加</button>' +
+      '<span class="fm-hint" id="ppMsg"></span></div>';
+
+    function preset() {
+      var k = $('#ppPreset').value;
+      var p = PROVIDER_PRESETS[k];
+      if (!$('#ppId').value) $('#ppId').value = k;
+      $('#ppName').value = p.name;
+      $('#ppBase').value = p.base_url;
+      $('#ppModel').value = p.model;
+    }
+    $('#ppPreset').addEventListener('change', preset);
+    preset();
+
+    function collect() {
+      return { id: $('#ppId').value.trim(), name: $('#ppName').value.trim(),
+               kind: 'openai', base_url: $('#ppBase').value.trim(),
+               api_key: $('#ppKey').value.trim(), model: $('#ppModel').value.trim(),
+               priority: 0, enabled: true };
+    }
+    function doTest(next) {
+      var body = collect();
+      var msg = $('#ppMsg');
+      if (!body.id || !body.base_url || !body.model) { msg.textContent = 'ID / Base URL / 模型 必填'; msg.style.color = '#d33'; return; }
+      msg.textContent = '验活中…'; msg.style.color = '#666';
+      wbFetch('/api/gateway/providers/test', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (o) {
+          if (o.ok && o.j.ok) {
+            msg.textContent = '✓ ' + (o.j.hint || '连通正常'); msg.style.color = '#1a7f37';
+            if (next) next(body);
+          } else {
+            msg.textContent = '✗ ' + (o.j.err || '') + ' · ' + (o.j.hint || '验活失败');
+            msg.style.color = '#d33';
+            if (o.j.detail) msg.title = o.j.detail;
+          }
+        })
+        .catch(function (e) { msg.textContent = '✗ ' + (e.message || e); msg.style.color = '#d33'; });
+    }
+    $('#ppTest').addEventListener('click', function () { doTest(null); });
+    $('#ppAdd').addEventListener('click', function () {
+      doTest(function (body) {
+        if (!body.api_key) { toast('请填写 API Key'); return; }
+        wbFetch('/api/gateway/providers', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        })
+          .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then(function () {
+            toast('已添加：' + body.name);
+            $('#ppKey').value = '';
+            loadProviders();
+            wbFetch('/api/gateway/active', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ provider_id: body.id })
+            }).catch(function () {});
+          })
+          .catch(function (e) { toast('添加失败：' + (e.message || e)); });
+      });
+    });
+  }
+
+  /* ---------------- 系统管理弹窗（B 方案：自助改密 + 用户管理 + 模型供应商）---------------- */
   function openAdminModal() {
     openFeatureModal('系统管理',
       '<div class="fm-sec"><h4>修改我的密码</h4>' +
@@ -1256,6 +1465,12 @@
         '<div class="fm-row"><input class="fm-input" id="amNew" type="password" placeholder="新密码（≥6 位）"></div>' +
         '<div class="fm-row"><input class="fm-input" id="amNew2" type="password" placeholder="确认新密码"></div>' +
         '<button class="fm-btn" id="amChg">修改密码</button></div>' +
+      '<div class="fm-sec"><h4>模型供应商（Key 存库，重启仍生效）</h4>' +
+        '<div class="fm-log" id="amProviders" style="max-height:300px;overflow:auto">加载中…</div>' +
+        '<h4 style="margin-top:14px">添加供应商</h4>' +
+        '<div id="amProvForm"></div>' +
+        '<div class="fm-hint">Key 加密前先在服务端落库，仅管理员可见/可改；' +
+          '供应商全挂时问答会自动降级为本地摘录，并在回答下方提示原因。</div></div>' +
       '<div class="fm-sec"><h4>用户管理（仅本租户）</h4>' +
         '<div class="fm-log" id="amUsers" style="max-height:260px;overflow:auto">加载中…</div></div>',
       '<button class="fm-btn secondary" id="amClose">关闭</button>');
@@ -1274,6 +1489,14 @@
         .catch(function (e) { toast('改密失败：' + (e.message || e)); });
     });
     loadUsers();
+    loadProviders();
+    renderProviderForm();
+    // 表格行事件用事件委托在容器上绑一次，避免每次 render 重绑
+    var pbox = $('#amProviders');
+    if (pbox) pbox.addEventListener('click', function (e) {
+      var tr = e.target.closest && e.target.closest('tr[data-pid]');
+      if (tr && !tr.__bound) { tr.__bound = true; bindProviderRow(tr); }
+    });
   }
   function loadUsers() {
     var box = $('#amUsers');

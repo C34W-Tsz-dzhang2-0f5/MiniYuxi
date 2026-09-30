@@ -19,6 +19,7 @@ from core import agent, auth, config, db, rag
 # 一致性由 scripts/check_version_consistency.py 强制校验。
 from core.version import __version__ as APP_VERSION
 import core.gateway as gateway
+import core.provider_router as provider_router
 import core.usage as usage
 import core.tools_registry as tools_registry
 import core.channels as channels
@@ -199,13 +200,30 @@ def health():
         search = tools_registry.search_backend_status()
     except Exception:
         search = {"default": "doubao"}
+    # modes.llm 只说明「有没有配 Key」，不说明「Key 现在还能不能用」——
+    # Key 过期/被撤销时它照样报 online，排查时会误判成服务正常。
+    # 这里对 active 供应商做一次真实探活（1 次极短请求，失败不抛），
+    # 把「配了但用不了」这种最常见的坑在 health 阶段就暴露出来。
+    llm_state = "online" if config.llm_enabled() else "offline-fallback"
+    llm_probe = None
+    if config.llm_enabled():
+        try:
+            r = provider_router.chat(
+                "ping", [{"role": "user", "content": "ping"}], tenant_id="default")
+            if not r.get("ok"):
+                llm_state = "degraded"
+                llm_probe = r.get("err") or "unknown"
+        except Exception as exc:                        # noqa: BLE001
+            llm_state = "degraded"
+            llm_probe = f"{type(exc).__name__}: {exc}"[:120]
     return {
         "ok": True,
         "service": "MiniYuxi",
         "version": APP_VERSION,
         "storage": {"db": "SQLite", "vector": f"sqlite-vec {db.vec_version()}", "fts": "FTS5"},
-        "modes": {"llm": "online" if config.llm_enabled() else "offline-fallback",
+        "modes": {"llm": llm_state,
                   "embedding": "online" if config.emb_enabled() else "bm25-only"},
+        "llm_probe": llm_probe,
         "search": search,
     }
 
@@ -1362,7 +1380,12 @@ def recruit_talent_stats(p: auth.Principal = Depends(need("agent.run"))):
 # ---- 项1：运行时热切换与多供应商路由 ----
 @app.get("/api/gateway/providers")
 def gw_providers(p: auth.Principal = Depends(need("chat"))):
-    return {"providers": provider_router.list_providers(), "active": provider_router.get_active()}
+    # 脱敏：Key 只回 has_key，不回明文。管理界面靠 has_key 决定占位提示。
+    # 过去这里直出 api_key，等于任何有 chat 权限的人都能从网络响应里读到全部供应商密钥。
+    rows = provider_router.list_providers()
+    safe = [{k: v for k, v in r.items() if k != "api_key"} | {"has_key": bool(r.get("api_key"))}
+            for r in rows]
+    return {"providers": safe, "active": provider_router.get_active()}
 
 
 class ProviderIn(BaseModel):
@@ -1380,6 +1403,51 @@ class ProviderIn(BaseModel):
 def gw_provider_add(body: ProviderIn, p: auth.Principal = Depends(need("agent.run"))):
     pid = provider_router.register_provider(body.dict(), db.connect())
     return {"ok": True, "id": pid}
+
+
+@app.delete("/api/gateway/providers/{provider_id}")
+def gw_provider_del(provider_id: str, p: auth.Principal = Depends(need("tenant.manage"))):
+    """删除供应商。仅 tenant.manage（管理员）可做，避免误删影响全员。
+
+    注意：删光最后一个启用的供应商后，provider_router 会回落到 config.LLM_PROVIDERS
+    （即环境变量 LLM_API_KEY）；若环境变量也没配，则整体转离线兜底。
+    """
+    provider_router.remove_provider(provider_id, db.connect())
+    return {"ok": True, "removed": provider_id}
+
+
+class ProviderTestIn(BaseModel):
+    id: str
+    name: str = ""
+    kind: str = "openai"
+    base_url: str
+    api_key: str = ""
+    model: str
+    priority: int = 0
+    enabled: bool = True
+
+
+@app.post("/api/gateway/providers/test")
+def gw_provider_test(body: ProviderTestIn, p: auth.Principal = Depends(need("agent.run"))):
+    """配置前先验活：拿候选配置真打一次上游，把结果回显给用户。
+
+    为什么不直接保存后再看 health：Key 写错时用户要等问答失败才发现，
+    而问答失败还会静默降级成本地摘录（历史上正是这个坑让人误判成"没上传文档"）。
+    """
+    if not body.api_key:
+        return {"ok": False, "err": "empty_api_key", "hint": "请填写 API Key"}
+    if not body.base_url:
+        return {"ok": False, "err": "empty_base_url", "hint": "请填写 Base URL"}
+    prov = {"id": body.id or "probe", "name": body.name or body.id or "probe",
+            "kind": body.kind, "base_url": body.base_url,
+            "api_key": body.api_key, "model": body.model, "priority": 0, "enabled": 1}
+    # 极短 max_tokens 只验鉴权与连通，不浪费 token
+    try:
+        resp = provider_router.probe(prov, tenant_id=p.tenant_id)
+    except Exception as exc:                             # noqa: BLE001
+        return {"ok": False, "err": f"{type(exc).__name__}: {exc}"[:200],
+                "hint": "请检查 Base URL 是否正确（含 /v1 后缀）"}
+    return resp
 
 
 class ActiveIn(BaseModel):

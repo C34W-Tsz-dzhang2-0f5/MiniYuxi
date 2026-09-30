@@ -110,6 +110,52 @@ def _fallback_providers() -> list:
     return [p for p in out if p["kind"] != OFFLINE_ID and p["api_key"] and p["base_url"]]
 
 
+def probe(prov: dict, tenant_id=None) -> dict:
+    """供应商配置验活：拿候选配置真打一次上游，用于「保存前先确认」。
+
+    与 _post 的区别：
+      - max_tokens=1，不烧 token；
+      - 不走重试/故障转移（单点判定，否则 A 挂了就误报 B 的错）；
+      - 把上游原始错误体回传，让用户能分清「Key 失效(401)」「模型名错(404)」
+        「余额不足(402)」——这三者过去在 UI 上长得一模一样。
+
+    返回 {ok, err, hint, detail}，绝不抛异常（探测失败是正常结果，不是错误）。
+    """
+    hint_map = {
+        "401": "API Key 无效或已被撤销 —— 请到供应商控制台重新复制 Key",
+        "402": "账户余额不足或欠费 —— 请充值后重试",
+        "403": "Key 无该模型/该资源的调用权限 —— 请检查模型名或套餐范围",
+        "404": "接口地址或模型名不存在 —— 请检查 Base URL（通常需带 /v1）与模型名拼写",
+        "429": "触发限流 —— 稍后重试，或换 Key",
+        "500": "上游服务内部错误 —— 可稍后重试",
+        "502": "上游网关错误 —— 通常是供应商侧临时故障",
+        "503": "上游服务不可用 —— 供应商可能维护中",
+        "504": "上游响应超时 —— 可稍后重试或换更快的模型",
+    }
+    try:
+        r = requests.post(
+            f"{(prov.get('base_url') or '').rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {prov.get('api_key', '')}",
+                     "Content-Type": "application/json"},
+            json={"model": prov.get("model", ""),
+                  "messages": [{"role": "user", "content": "ping"}],
+                  "max_tokens": 1},
+            timeout=20,
+        )
+    except requests.exceptions.Timeout:
+        return {"ok": False, "err": "timeout", "hint": "连接超时 —— 请检查 Base URL 或网络代理",
+                "detail": ""}
+    except requests.exceptions.RequestException as exc:
+        return {"ok": False, "err": "network", "hint": f"网络不可达：{str(exc)[:120]}", "detail": ""}
+
+    if r.status_code == 200:
+        return {"ok": True, "err": "", "hint": "连通正常，Key 有效", "detail": ""}
+    body = (r.text or "")[:300]
+    return {"ok": False, "err": f"HTTP {r.status_code}",
+            "hint": hint_map.get(str(r.status_code), "上游返回异常"),
+            "detail": body}
+
+
 def _post(payload: dict, prov: dict, tenant_id=None):
     # 出境闸门：多供应商故障转移会依次打到不同 base_url，每一次都须过闸（否则
     # 「切一个供应商就绕过管控」）。被拒 → 视为该供应商失败，继续走下一个/离线兜底。

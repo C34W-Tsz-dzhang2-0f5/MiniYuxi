@@ -17,6 +17,22 @@ from . import config, gateway, provider_router, rag, tools_registry
 # 测试可用 importlib.reload(config) 覆盖。
 MAX_LOOPS = int(getattr(config, "AGENT_MAX_LOOPS", 6) or 6)
 
+# 最近一次 run() 的失败现场（模块级单槽）。
+# 为什么用模块级而不是返回值：run() 在「全供应商失败」时按契约必须返回 None
+# （调用方据此退化），没有位置携带错误详情。历史上就是这样把「Key 失效」
+# 吞成「静默降级为本地摘录」，用户完全无从判断真因。
+_LAST_ERROR: dict = {"err": "", "attempts": []}
+
+
+def last_error() -> dict:
+    """读取最近一次 run() 的失败现场（供 rag.answer 透出可诊断的 reason）。"""
+    return dict(_LAST_ERROR)
+
+
+def reset_last_error() -> None:
+    _LAST_ERROR["err"] = ""
+    _LAST_ERROR["attempts"] = []
+
 
 def _llm_chat(system, messages, tools, tenant_id=None, provider=None, model=None):
     """Agent Loop 的 LLM 出口：走 provider_router 以获得多供应商故障转移。
@@ -141,6 +157,11 @@ def run(system: str, user_prompt: str, history: list | None = None,
     tid = observability.start_trace(trace_id)
     guard = circuit_breaker.BudgetGuard(tenant_id=tenant_id)
     _emit(emit, "lifecycle", {"phase": "start", "trace_id": tid})
+    # 本次运行的失败现场（Key 失效/限流/全宕机）。供 rag.answer 透出可诊断的 reason，
+    # 避免「静默退化成离线抽取式」——用户只看到答不出来，看不到真因。
+    _last_error = {"err": "", "attempts": []}
+    _LAST_ERROR["err"] = ""
+    _LAST_ERROR["attempts"] = []
 
     tools = _to_openai_tools(allowed_toolsets)
     messages = []
@@ -196,6 +217,12 @@ def run(system: str, user_prompt: str, history: list | None = None,
             lsp.set_status("offline")
             _emit(emit, "lifecycle", {"phase": "error", "error": res.get("err") or "gateway_offline",
                                       "attempts": res.get("attempts") or [], "trace_id": tid})
+            # ⚠️ 不能裸 return None：caller 拿到 None 只会退化成本地抽取式，
+            # 用户看到的是「答不出来」，完全不知道是 Key 失效/限流/宕机。
+            # 把失败原因与每次尝试挂在 _last_error 上，由 rag.answer 透出到 mode/reason。
+            _last_error["err"] = res.get("err") or "gateway_offline"
+            _last_error["attempts"] = res.get("attempts") or []
+            _LAST_ERROR.update(_last_error)
             return None  # 全供应商失败（如限流/宕机）→ caller 退化
         # 故障转移留痕：本次实际由哪个供应商应答，切了几次（排障/对账用）。
         if len(res.get("attempts") or []) > 1 or res.get("provider") not in (None, provider):

@@ -21,6 +21,24 @@ _CJK = r"\u4e00-\u9fff"
 MAX_HISTORY = 10
 MAX_HISTORY_CHARS = 800
 
+# provider_router 失败码 → 运维可读提示。
+# 存在的意义：模型 Key 挂掉时，用户看到的必须是一句「Key 失效」，
+# 而不是「答得不对」——后者会让人误以为是自己没上传文档，反复瞎排查。
+_DEGRADE_HINT = {
+    "HTTP 401": "模型 API Key 已失效或被撤销（HTTP 401），已退回本地摘录模式。请检查 start_miniyuxi.bat / 环境变量中的 LLM_API_KEY",
+    "HTTP 402": "模型账户余额不足或欠费（HTTP 402），已退回本地摘录模式。请到供应商控制台充值",
+    "HTTP 403": "模型服务拒绝访问（HTTP 403），已退回本地摘录模式。请确认 Key 有该模型的调用权限",
+    "HTTP 404": "模型接口地址或模型名不存在（HTTP 404），已退回本地摘录模式。请检查 Base URL（通常需带 /v1）与模型名",
+    "HTTP 429": "模型服务限流（HTTP 429），已退回本地摘录模式。请稍后重试或换用其他供应商",
+    "HTTP 500": "模型服务内部错误（HTTP 500），已退回本地摘录模式。可稍后重试",
+    "HTTP 502": "模型网关错误（HTTP 502），已退回本地摘录模式。通常为供应商侧临时故障",
+    "HTTP 503": "模型服务不可用（HTTP 503），已退回本地摘录模式。供应商可能维护中",
+    "HTTP 504": "模型响应超时（HTTP 504），已退回本地摘录模式。可稍后重试或换更快的模型",
+    "all_providers_failed": "所有已配置的模型供应商均调用失败，已退回本地摘录模式",
+    "offline": "未配置可用的模型 Key（LLM_API_KEY 为空或全部供应商被禁用），已退回本地摘录模式",
+    "egress_denied": "模型网关被出境管控策略拦截，已退回本地摘录模式",
+}
+
 
 # ---------------- 分词：中文 bigram + 英文/数字词 ----------------
 def tokenize(text: str) -> list[str]:
@@ -468,9 +486,28 @@ def answer(tenant_id: str, question: str, top_k: int = 5, history: list | None =
     from . import agent_loop, memory
     mem = memory.recall(tenant_id, limit=8)
     system = _agent_system(context, len(hits))
+    agent_loop.reset_last_error()
     res = agent_loop.run(system, question, history, tenant_id=tenant_id, memories=mem, emit=emit)
     if res is None:
+        # Agent 全供应商失败（如 Key 失效 401 / 限流 429 / 宕机 5xx）。
+        # 这里仍退回抽取式保证「有答案」，但必须把真因带出去 —— 否则用户只会看到
+        # 「答得不对」，无从判断是自己没上传文档还是模型 Key 挂了。
         out = _rag_single(system, question, history, tenant_id, hits, citations)
+        err = agent_loop.last_error()
+        if err.get("err"):
+            out["mode"] = "degraded"
+            out["reason"] = err["err"]
+            out["llm_attempts"] = err.get("attempts") or []
+            # 优先用供应商级的具体状态码（all_providers_failed 只是个汇总，
+            # 真正有用的是 attempts 里那条 HTTP 401/429/5xx）。
+            hint = ""
+            for at in out["llm_attempts"]:
+                if at.get("err"):
+                    hint = _DEGRADE_HINT.get(at["err"], "")
+                    if hint:
+                        break
+            out["warnings"] = (out.get("warnings") or []) + [hint or _DEGRADE_HINT.get(
+                err["err"], "模型服务不可用，已退回本地摘录模式（答案未经大模型润色/推理）")]
     else:
         warn = _ghost_numbers(res["answer"], context)
         out = {"answer": res["answer"], "citations": citations, "mode": "agent",
