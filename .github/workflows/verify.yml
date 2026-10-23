@@ -95,6 +95,16 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      # web/vendor/univer/* 是 office-bundle 的构建产物、被 .gitignore 忽略，checkout 里没有。
+      # 不先构建 → PyInstaller 收不进 univer.worker.js → 公式引擎 Worker 缺失
+      # （主线程 preset 会把 notExecuteFormula 置 true，SUM/AVG 不求值）+ 冻结产物校验 MISS。
+      - name: Build office bundle (univer vendor assets)
+        run: |
+          cd tools/office-bundle
+          npm ci
+          npm run build
+          cd ../..
+
       - name: Build Windows sidecar (PyInstaller -> Tauri externalBin)
         run: python scripts/build_sidecar.py
 
