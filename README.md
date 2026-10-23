@@ -3,18 +3,16 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)](https://www.python.org)
 [![Self-test](https://img.shields.io/badge/selftest-20%2F20-brightgreen)](tests/selftest.py)
-[![Stars](https://img.shields.io/github/stars/C34W-Tsz-dzhang2-0f5/MiniYuxi?style=social)](https://github.com/C34W-Tsz-dzhang2-0f5/MiniYuxi/stargazers)
 
 > **把 Agent 跑进企业工作流**——Web / Desktop / CLI 三端共享同一套内核，SQLite 单文件、零外部服务、可审计。
 > 内核只写一次，三端只是外壳；工具、记忆、权限、审计天然一致。
 
 ![MiniYuxi 三端统一工作台](docs/assets/readme_hero.png)
 
-> 🖥️ **桌面版安装包**（Windows x64，含内置 Python 内核，双击即用）：
-> [MiniYuxi_0.4.0_x64_en-US.msi](https://github.com/C34W-Tsz-dzhang2-0f5/MiniYuxi/releases/latest/download/MiniYuxi_0.4.0_x64_en-US.msi)（约 95 MB · 待发布）
->
-> ⚠️ 0.4.0 安装包需在装有 **WiX Toolset v3** 的 Windows 主机重新构建并发布：
-> `cd apps/desktop && npm run sidecar && npm run build`（产物位于 `target/release/bundle/msi/MiniYuxi_0.4.0_x64_en-US.msi`）。
+> 🖥️ **想要双击即用的安装包？**
+> 预构建 MSI 正在随 v0.4.0 重新发布（需装有 WiX Toolset v3 的 Windows 主机构建），
+> 已发布版本见 [Releases](https://github.com/C34W-Tsz-dzhang2-0f5/MiniYuxi/releases)；
+> 想现在就用桌面版，按下方《Desktop 端》一节从源码构建（3 条命令）。
 
 ## ✨ 核心特性
 
@@ -42,7 +40,7 @@ python run.py                                       # http://127.0.0.1:8801
 python tests/selftest.py                            # 期望 20/20
 ```
 
-默认账号：`default / admin / admin123`（**首次部署务必改密**）。
+默认账号：`default`（初始口令见下方《部署与安全红线》，**首次部署务必修改**）。
 
 ### 🖥️ Desktop 端（Tauri + Python sidecar · 已落地 P3）
 
@@ -109,7 +107,7 @@ python scripts/verify.py --quick    # 只跑纯 stdlib 快卡点（约 2.5s）
 
 > 仓库**不含任何密钥**；真实 Key 经环境变量或根目录 `.env`（已忽略）提供。
 
-- 默认 `MINIYUXI_SECRET` 为开发值、`admin/admin123` 为默认口令——**生产务必改**。
+- `MINIYUXI_SECRET` 与默认管理员口令均为**开发默认值**——**生产部署务必修改**（Web 端登录后立即改密）。
 - 仅绑定 `127.0.0.1`；对内/对外访问务必套 **nginx 反代 + HTTPS**。
 - SQLite 单写者，小团队可用；公网/高并发建议换 Postgres。
 - 定期备份 `data/miniyuxi.db`（含向量、审计链、账号）。
@@ -127,6 +125,10 @@ python scripts/verify.py --quick    # 只跑纯 stdlib 快卡点（约 2.5s）
 - 出境日志**只记目的地主机 / 字节数 / 脱敏截断摘要**，绝不记载荷全文；同时写入 SOC 哈希链。
 - ⚠️ **商务/法务**：技术开关不等于合规完成。面向企业交付时，个保法下的**告知同意**与
   **数据处理协议（DPA）**仍是必备动作。
+
+## 🗺️ 路线图
+
+近期计划见 [`ROADMAP.md`](ROADMAP.md)：事件流 SSE ✅ / 代码文件工具 / Swarm 子 Agent / Heartbeat / 桌面版 MSI 重发。
 
 ## 🤝 贡献
 
