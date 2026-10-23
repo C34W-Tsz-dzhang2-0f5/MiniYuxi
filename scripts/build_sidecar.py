@@ -202,4 +202,12 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Windows CI runner 的 stdout 默认 cp1252：下面多处中文 print 会直接
+    # UnicodeEncodeError（2026-10-23：CI build-sidecar 因此连挂 17 次、0 秒即崩）。
+    # 在 import 之后、任何输出之前强制 UTF-8；reconfigure 不存在时安静跳过。
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     sys.exit(main())

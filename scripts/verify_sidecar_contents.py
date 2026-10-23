@@ -109,4 +109,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Windows CI runner 的 stdout 默认 cp1252：本脚本大量中文 print 会直接
+    # UnicodeEncodeError（与 build_sidecar.py 同坑，2026-10-23 修复）。
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     sys.exit(main())

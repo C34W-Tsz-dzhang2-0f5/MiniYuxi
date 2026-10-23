@@ -76,6 +76,11 @@ jobs:
   # 且 Tauri externalBin 仅 Windows 平台，Linux CI 跑会假红。
   build-sidecar:
     runs-on: windows-latest
+    env:
+      # Windows runner 的 stdout 默认 cp1252：脚本里的中文 print 会触发
+      # UnicodeEncodeError、0 秒即崩（2026-10-23 修复，连挂 17 次的根因）。
+      # 脚本入口已 reconfigure UTF-8，这里再兜一层底。
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
 
